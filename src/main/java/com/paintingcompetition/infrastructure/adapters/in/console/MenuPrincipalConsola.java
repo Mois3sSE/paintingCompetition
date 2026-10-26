@@ -13,17 +13,12 @@ import java.security.interfaces.RSAPublicKey;
 import java.util.Scanner;
 import java.util.UUID;
 import java.util.Base64;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Scanner;
 
-/**
- * Adaptador de Entrada (Driving Adapter) que implementa una interfaz de usuario
- * por consola.
- * Proporciona un menú de inicio de sesión simulado para interactuar con el
- * sistema criptográfico.
- */
 public class MenuPrincipalConsola {
 
     private final Scanner scanner;
@@ -40,15 +35,11 @@ public class MenuPrincipalConsola {
         this.motorAnonimato = motorAnonimato;
     }
 
-    /**
-     * Inicia el bucle principal de la aplicación en consola.
-     */
     public void iniciar() {
         boolean salir = false;
 
         System.out.println("========================================================");
         System.out.println(" SISTEMA DE CONCURSO DE PINTURA (CORE CRIPTOGRÁFICO)");
-        System.out.println(" Arquitectura Hexagonal - Puertos y Adaptadores");
         System.out.println("========================================================");
 
         while (!salir) {
@@ -73,7 +64,7 @@ public class MenuPrincipalConsola {
                     break;
 
                 case "4":
-                    System.out.println("\nSaliendo del sistema. ¡Hasta pronto!");
+                    System.out.println("\nSaliendo del sistema. ");
                     salir = true;
                     break;
                 default:
@@ -116,7 +107,7 @@ public class MenuPrincipalConsola {
         if (nombre.isEmpty()) {
             nombre = "Presidente";
         }
-        Usuario presidente = new Usuario(UUID.randomUUID().toString(), nombre, RolUsuario.ORGANIZADOR);
+        Usuario presidente = new Usuario(UUID.randomUUID().toString(), nombre, RolUsuario.PRESIDENTE);
         System.out.println(">> Sesión iniciada con éxito como: " + presidente.getNombreUsuario() + " (Rol: "
                 + presidente.getRol() + ")");
         menuPresidente(presidente);
@@ -214,12 +205,17 @@ public class MenuPrincipalConsola {
             RSAPrivateKey llavePrivada = (RSAPrivateKey) llavesPresidente.getPrivate();
 
             int[] votosDejueces = { 2, 1, 3 };
+            String[] comentariosDejueces = {"Fue un buen trabajo pero le falta trabajar mas las sombras",
+                "Le falta mucha tecnica por conocer", "De los mejores trabajos que he visto"
+            }; 
             byte[][] votoByte = new byte[3][];
 
             for (int i = 0; i < votosDejueces.length; i++) {
                 int numerojuez = i + 1;
                 int voto = votosDejueces[i];
-                votoByte[i] = new byte[] { (byte) voto };
+                String comentario = comentariosDejueces[i];
+                String paqueteVoto = "ESTRELLAS:" + voto+ "|COMENTARIO:" + comentario; 
+                votoByte[i] = paqueteVoto.getBytes(StandardCharsets.UTF_8); 
 
                 BigInteger factorCegado = modulo.generarFactorCegado(llavePublica);
                 byte[] votoCegado = modulo.cegarMensaje(votoByte[i], factorCegado, llavePublica);

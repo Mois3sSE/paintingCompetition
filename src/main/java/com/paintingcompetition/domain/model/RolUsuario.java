@@ -6,5 +6,5 @@ package com.paintingcompetition.domain.model;
 public enum RolUsuario {
     PINTOR,
     JUEZ,
-    ORGANIZADOR
+    PRESIDENTE
 }

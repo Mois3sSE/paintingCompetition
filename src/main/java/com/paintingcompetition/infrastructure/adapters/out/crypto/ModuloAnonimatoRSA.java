@@ -8,7 +8,6 @@ import org.bouncycastle.crypto.engines.RSABlindingEngine;
 import org.bouncycastle.crypto.params.RSABlindingParameters;
 import org.bouncycastle.crypto.engines.RSAEngine;
 
-
 import java.math.BigInteger;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -18,33 +17,28 @@ import java.security.interfaces.RSAPublicKey;
 import java.util.Arrays;
 
 /**
- Generación del factor de cegado, cegado de mensajes y
-* protocolo de firma ciega RSA (Chaum).
+ * Generación del factor de cegado, cegado de mensajes y
+ * protocolo de firma ciega RSA (Chaum).
  */
 public class ModuloAnonimatoRSA implements MotorCriptograficoPort {
 
-
     @Override
     public byte[] cifrar(byte[] datos, Object clave) {
-        // Operación fuera del alcance de anonimato RSA
-        throw new UnsupportedOperationException("El modulo de Anonimato no realiza la opreacion de cifrar."); 
+        throw new UnsupportedOperationException("El modulo de Anonimato no realiza la opreacion de cifrar.");
     }
 
     @Override
     public byte[] firmar(byte[] datos, Object clavePrivada) {
-        return firmarCegadoRSA(datos, (RSAPrivateKey) clavePrivada); 
+        return firmarCegadoRSA(datos, (RSAPrivateKey) clavePrivada);
     }
 
     @Override
     public byte[] cegar(byte[] datos, Object clavePublica) {
         RSAPublicKey llavePub = (RSAPublicKey) clavePublica;
-        BigInteger factor = generarFactorCegado(llavePub); 
+        BigInteger factor = generarFactorCegado(llavePub);
         return cegarMensaje(datos, factor, llavePub);
     }
 
-    /**
-     * Genera un par de llaves RSA (3072) para la autoridad de validación/concurso.
-     */
     public KeyPair generarParLlavesRSA() {
         try {
             KeyPairGenerator generador = KeyPairGenerator.getInstance("RSA");
@@ -55,106 +49,89 @@ public class ModuloAnonimatoRSA implements MotorCriptograficoPort {
         }
     }
 
-    /**
-     * Genera un factor de cegado 'r' coprimo con el módulo 'N' de la clave pública
-     * RSA (gcd(r, N) == 1).
-     */
     public BigInteger generarFactorCegado(RSAPublicKey clavePublicaRSA) {
-        try{
-            RSAKeyParameters llavePublicaBC = new RSAKeyParameters(false, 
-                clavePublicaRSA.getModulus(), 
-                clavePublicaRSA.getPublicExponent()); 
+        try {
+            RSAKeyParameters llavePublicaBC = new RSAKeyParameters(false,
+                    clavePublicaRSA.getModulus(),
+                    clavePublicaRSA.getPublicExponent());
 
-            RSABlindingFactorGenerator generadorFactor = new RSABlindingFactorGenerator(); 
-            SecureRandom randomSeguro = new SecureRandom(); 
-            generadorFactor.init(new ParametersWithRandom(llavePublicaBC,randomSeguro));
-            return generadorFactor.generateBlindingFactor(); 
+            RSABlindingFactorGenerator generadorFactor = new RSABlindingFactorGenerator();
+            SecureRandom randomSeguro = new SecureRandom();
+            generadorFactor.init(new ParametersWithRandom(llavePublicaBC, randomSeguro));
+            return generadorFactor.generateBlindingFactor();
 
-        }catch(Exception e ){
-            throw new RuntimeException("Error al general el factor de cegado."); 
+        } catch (Exception e) {
+            throw new RuntimeException("Error al general el factor de cegado.");
         }
 
     }
 
-    /**
-     * Aplica el factor de cegado al mensaje: m' = (m * (r^e)) mod N.
-     */
     public byte[] cegarMensaje(byte[] mensaje, BigInteger factorCegado, RSAPublicKey clavePublicaRSA) {
-        try{
-            RSAKeyParameters llavePublicaBC = new RSAKeyParameters(false, 
-                clavePublicaRSA.getModulus(), 
-                clavePublicaRSA.getPublicExponent());
-            RSABlindingParameters parametrosCegado = new RSABlindingParameters(llavePublicaBC,factorCegado); 
-            RSABlindingEngine motorCegado = new RSABlindingEngine(); 
+        try {
+            RSAKeyParameters llavePublicaBC = new RSAKeyParameters(false,
+                    clavePublicaRSA.getModulus(),
+                    clavePublicaRSA.getPublicExponent());
+            RSABlindingParameters parametrosCegado = new RSABlindingParameters(llavePublicaBC, factorCegado);
+            RSABlindingEngine motorCegado = new RSABlindingEngine();
             motorCegado.init(true, parametrosCegado);
-            return motorCegado.processBlock(mensaje, 0, mensaje.length); 
-        } catch(Exception e ){
-            throw new RuntimeException("Error al cegar el mensaje."); 
+            return motorCegado.processBlock(mensaje, 0, mensaje.length);
+        } catch (Exception e) {
+            throw new RuntimeException("Error al cegar el mensaje.");
         }
     }
 
-    /**
-     * La autoridad firmante firma el mensaje cegado sin conocer su contenido real:
-     * s' = (m')^d mod N.
-     */
     public byte[] firmarCegadoRSA(byte[] mensajeCegado, RSAPrivateKey clavePrivadaRSA) {
-        try{
-            RSAKeyParameters llavePrivadaBC = new RSAKeyParameters(true, 
-                clavePrivadaRSA.getModulus(), 
-                clavePrivadaRSA.getPrivateExponent());
+        try {
+            RSAKeyParameters llavePrivadaBC = new RSAKeyParameters(true,
+                    clavePrivadaRSA.getModulus(),
+                    clavePrivadaRSA.getPrivateExponent());
+
             RSAEngine motorRSA = new RSAEngine();
             motorRSA.init(true, llavePrivadaBC);
-            return motorRSA.processBlock(mensajeCegado, 0, mensajeCegado.length); 
+            return motorRSA.processBlock(mensajeCegado, 0, mensajeCegado.length);
 
-        } catch(Exception e ){
+        } catch (Exception e) {
             throw new RuntimeException("Error al aplicar la firma al mensaje");
         }
     }
 
-    /**
-     * El autor/pintor descega la firma recibida: s = (s' * (r^-1)) mod N,
-     * obteniendo una firma válida sobre m.
-     */
     public byte[] descegarFirmaRSA(byte[] firmaCegada, BigInteger factorCegado, RSAPublicKey clavePublicaRSA) {
-        try{
-            RSAKeyParameters llavePublicaBC = new RSAKeyParameters(false, 
-                clavePublicaRSA.getModulus(), 
-                clavePublicaRSA.getPublicExponent());
-            
-                RSABlindingParameters parametrosCegado = new RSABlindingParameters(llavePublicaBC, factorCegado); 
-                RSABlindingEngine motorCegado = new RSABlindingEngine(); 
-                motorCegado.init(false, parametrosCegado);
-                return motorCegado.processBlock(firmaCegada, 0, firmaCegada.length);
-        } catch(Exception e ){
-            throw new RuntimeException("Error al descegar la firma."); 
+        try {
+            RSAKeyParameters llavePublicaBC = new RSAKeyParameters(false,
+                    clavePublicaRSA.getModulus(),
+                    clavePublicaRSA.getPublicExponent());
+
+            RSABlindingParameters parametrosCegado = new RSABlindingParameters(llavePublicaBC, factorCegado);
+            RSABlindingEngine motorCegado = new RSABlindingEngine();
+            motorCegado.init(false, parametrosCegado);
+            return motorCegado.processBlock(firmaCegada, 0, firmaCegada.length);
+        } catch (Exception e) {
+            throw new RuntimeException("Error al descegar la firma.");
         }
     }
 
-    /**
-     * Verifica que la firma descegada corresponda efectivamente al mensaje original
-     * y a la clave pública RSA: s^e mod N == m.
-     */
     public boolean verificarFirmaRSA(byte[] mensajeOriginal, byte[] firmaDescegada, RSAPublicKey clavePublicaRSA) {
-        try{
-        RSAKeyParameters llavePublicaBC = new RSAKeyParameters(false, 
-                clavePublicaRSA.getModulus(), 
-                clavePublicaRSA.getPublicExponent());
-            RSAEngine motorRSA = new RSAEngine(); 
+        try {
+            RSAKeyParameters llavePublicaBC = new RSAKeyParameters(false,
+                    clavePublicaRSA.getModulus(),
+                    clavePublicaRSA.getPublicExponent());
+                    
+            RSAEngine motorRSA = new RSAEngine();
             motorRSA.init(true, llavePublicaBC);
-            byte[] mensajeRecuperado = motorRSA.processBlock(firmaDescegada, 0, firmaDescegada.length); 
-            return Arrays.equals(limpiarCeros(mensajeRecuperado), limpiarCeros(mensajeOriginal)); 
-        } catch(Exception e ){
+            byte[] mensajeRecuperado = motorRSA.processBlock(firmaDescegada, 0, firmaDescegada.length);
+            return Arrays.equals(limpiarCeros(mensajeRecuperado), limpiarCeros(mensajeOriginal));
+        } catch (Exception e) {
             System.err.println("Error en la verificacion de firma: " + e.getMessage());
-            return false; 
+            return false;
         }
-        
+
     }
 
-    private byte[] limpiarCeros(byte[] arreglo){
-        int i = 0; 
+    private byte[] limpiarCeros(byte[] arreglo) {
+        int i = 0;
         while (i < arreglo.length && arreglo[i] == 0) {
-            i++; 
+            i++;
         }
-        return Arrays.copyOfRange(arreglo, i,arreglo.length);
+        return Arrays.copyOfRange(arreglo, i, arreglo.length);
     }
 }
