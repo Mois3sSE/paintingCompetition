@@ -5,25 +5,18 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.util.Scanner;
 import java.util.UUID;
+import java.math.BigInteger;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+import java.util.Base64;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 import com.paintingcompetition.domain.model.RolUsuario;
 import com.paintingcompetition.domain.model.Usuario;
 import com.paintingcompetition.domain.ports.out.MotorCriptograficoPort;
 import com.paintingcompetition.infrastructure.adapters.out.crypto.ModuloAnonimatoRSA;
 
-import java.math.BigInteger;
-import java.security.KeyPair;
-import java.security.interfaces.RSAPrivateCrtKey;
-import java.security.interfaces.RSAPrivateKey;
-import java.security.interfaces.RSAPublicKey;
-import java.util.Scanner;
-import java.util.UUID;
-import java.util.Base64;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Scanner;
 import com.paintingcompetition.domain.ports.out.RegistroECDSAPort;
 
 public class MenuPrincipalConsola {
