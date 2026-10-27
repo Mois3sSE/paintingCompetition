@@ -9,17 +9,14 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 import java.security.Security;
 
-/**
- * Punto de entrada principal de la aplicación.
- * Inicializa el proveedor criptográfico Bouncy Castle, instancia los adaptadores y arranca la consola.
- */
 public class Main {
 
     public static void main(String[] args) {
         // Registro del proveedor de seguridad Bouncy Castle
         Security.addProvider(new BouncyCastleProvider());
 
-        // Inyección de dependencias de los Adaptadores de Salida (Cajas Negras de los 3 Integrantes)
+        // Inyección de dependencias de los Adaptadores de Salida (Cajas Negras de los 3
+        // Integrantes)
         MotorCriptograficoPort motorAES = new ModuloConfidencialidadAES();
         MotorCriptograficoPort motorECDSA = new ModuloRegistroECDSA();
         MotorCriptograficoPort motorRSA = new ModuloAnonimatoRSA();

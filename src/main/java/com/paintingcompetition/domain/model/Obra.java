@@ -3,7 +3,8 @@ package com.paintingcompetition.domain.model;
 import java.util.Arrays;
 
 /**
- * Entidad de Dominio que representa una Obra de pintura registrada en el concurso.
+ * Entidad de Dominio que representa una Obra de pintura registrada en el
+ * concurso.
  */
 public class Obra {
 
@@ -11,7 +12,7 @@ public class Obra {
     private String titulo;
     private String descripcion;
     private String autorId;
-    
+
     // Campos criptográficos asociados a la obra
     private byte[] contenidoCifrado;
     private byte[] ivCifrado;

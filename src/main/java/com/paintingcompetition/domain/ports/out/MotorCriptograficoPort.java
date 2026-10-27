@@ -1,13 +1,10 @@
 package com.paintingcompetition.domain.ports.out;
 
-/**
- * Puerto de Salida (Arquitectura Hexagonal) que define el contrato para operaciones
- * criptográficas del sistema: Confidencialidad (cifrado), Autenticidad (firma) y Anonimato (cegado).
- */
 public interface MotorCriptograficoPort {
 
     /**
-     * Cifra datos en claro utilizando los parámetros criptográficos correspondientes.
+     * Cifra datos en claro utilizando los parámetros criptográficos
+     * correspondientes.
      *
      * @param datos Datos en claro a proteger.
      * @param clave Clave requerida para el algoritmo de cifrado.
@@ -18,7 +15,7 @@ public interface MotorCriptograficoPort {
     /**
      * Genera una firma digital para garantizar integridad y no repudio.
      *
-     * @param datos Datos o hash a firmar.
+     * @param datos        Datos o hash a firmar.
      * @param clavePrivada Clave privada del firmante.
      * @return Firma digital generada, o null.
      */
@@ -27,9 +24,21 @@ public interface MotorCriptograficoPort {
     /**
      * Aplica el factor de cegado a un mensaje para el protocolo de firma ciega.
      *
-     * @param datos Mensaje a cegar.
+     * @param datos        Mensaje a cegar.
      * @param clavePublica Clave pública de la entidad firmante.
      * @return Mensaje cegado, o null.
      */
     byte[] cegar(byte[] datos, Object clavePublica);
+
+    /**
+     * Verifica la autenticidad e integridad de una firma digital.
+     *
+     * @param datos Datos originales que fueron firmados.
+     * @param firma Firma digital a verificar.
+     * @param clave Clave pública o parámetros para la verificación.
+     * @return true si la firma es válida, false en caso contrario.
+     */
+    default boolean verificar(byte[] datos, byte[] firma, Object clave) {
+        throw new UnsupportedOperationException("La operación de verificación no está soportada por este módulo.");
+    }
 }
