@@ -1,4 +1,3 @@
-
 package com.paintingcompetition.domain.ports.out;
 
 import java.nio.file.Path;
@@ -25,8 +24,7 @@ public interface RegistroECDSAPort extends MotorCriptograficoPort {
     boolean verificarFirmaECDSA(
             byte[] mensaje,
             byte[] firma,
-            PublicKey clavePublica
-    );
+            PublicKey clavePublica);
 
     // Persistencia y carga de llaves EC
     void guardarLlavePublica(PublicKey clavePublica, Path rutaArchivo) throws Exception;
@@ -36,4 +34,9 @@ public interface RegistroECDSAPort extends MotorCriptograficoPort {
     PublicKey cargarLlavePublica(Path rutaArchivo) throws Exception;
 
     PrivateKey cargarLlavePrivada(Path rutaArchivo) throws Exception;
+
+    // Persistencia y carga de firmas digitales ECDSA
+    void guardarFirmaDigital(byte[] firma, Path rutaArchivo) throws Exception;
+
+    byte[] cargarFirmaDigital(Path rutaArchivo) throws Exception;
 }

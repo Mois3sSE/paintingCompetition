@@ -1,5 +1,4 @@
-
-package com.paintingcompetition.infrastructure.adapters.in.console;
+﻿package com.paintingcompetition.infrastructure.adapters.in.console;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -21,7 +20,15 @@ import com.paintingcompetition.infrastructure.adapters.out.crypto.ModuloFirmaRSA
 import com.paintingcompetition.infrastructure.adapters.out.io.GestorArchivosActaAdapter;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.MessageDigest;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Stream;
+import java.util.Map;
+import java.util.LinkedHashMap;
 
 import com.paintingcompetition.domain.ports.out.RegistroECDSAPort;
 import com.paintingcompetition.domain.ports.out.ConfidencialidadAESPort;
@@ -66,13 +73,25 @@ public class MenuPrincipalConsola {
     private PublicKey llavePublicaPintor;
     private PrivateKey llavePrivadaPintor;
 
-    // Llave simétrica AES derivada por el pintor mediante ECDH con la llave pública del sistema
+    // Llave simétrica AES derivada por el pintor mediante ECDH con la llave pública
+    // del sistema
     private SecretKey claveAESPintor;
 
     // Última imagen cifrada del pintor en la sesión
     private byte[] ultimaImagenCifrada;
     private byte[] ultimoIV;
     private Path ultimaRutaImagenCifrada;
+
+    // Última firma digital ECDSA y hash de la obra cifrada
+    private byte[] ultimoHashObraCifrada;
+    private byte[] ultimaFirmaDigitalPintor;
+    private Path ultimaRutaFirmaPintor;
+
+    // Llave simétrica AES recuperada por el sistema para una obra verificada
+    private SecretKey ultimaClaveAESRecuperada;
+
+    // Última imagen descifrada por el juez/sistema
+    private Path ultimaRutaImagenDescifrada;
 
     public MenuPrincipalConsola(
             MotorCriptograficoPort motorConfidencialidad,
@@ -113,8 +132,8 @@ public class MenuPrincipalConsola {
                     iniciarSesion();
                     break;
 
-                case "3":
-                    System.out.println("\nSaliendo del sistema. ");
+                case "2":
+                    System.out.println("\nSaliendo del sistema. Hasta pronto.");
                     salir = true;
                     break;
 
@@ -133,8 +152,7 @@ public class MenuPrincipalConsola {
      * Si ya existen en la carpeta "claves_sistema", se cargan sin volver a
      * generarlas.
      * Si no existen, se genera un nuevo par de llaves EC (secp256r1) y se guardan
-     * como
-     * "pub_sist.txt" y "priv_sist.txt".
+     * como "pub_sist.txt" y "priv_sist.txt".
      */
     private void inicializarLlavesSistema() {
         Path dirClaves = Paths.get("claves_sistema");
@@ -191,8 +209,7 @@ public class MenuPrincipalConsola {
      * Si ya existen en la carpeta "claves_usuario/presidente", se cargan sin volver
      * a generarlas.
      * Si no existen, se genera un nuevo par de llaves EC (secp256r1) y se guardan
-     * como
-     * "pub_presidente.txt" y "priv_presidente.txt".
+     * como "pub_presidente.txt" y "priv_presidente.txt".
      */
     public void inicializarLlavesPresidente() {
         Path dirClaves = Paths.get("claves_usuario", "presidente");
@@ -258,8 +275,7 @@ public class MenuPrincipalConsola {
      * Se guardan en la carpeta "claves_usuario/jueces/<nombreUsuario>".
      * Si ya existen en dicha carpeta, se cargan sin volver a generarlas.
      * Si no existen, se genera un nuevo par de llaves EC (secp256r1) y se guardan
-     * como
-     * "pub_<nombreUsuario>.txt" y "priv_<nombreUsuario>.txt".
+     * como "pub_<nombreUsuario>.txt" y "priv_<nombreUsuario>.txt".
      */
     public void inicializarLlavesJuez(Usuario juez) {
         if (juez != null) {
@@ -342,8 +358,7 @@ public class MenuPrincipalConsola {
      * Si dicha carpeta no existe, se crea automáticamente.
      * Si ya existen las llaves en dicha carpeta, se cargan sin volver a generarlas.
      * Si no existen, se genera un nuevo par de llaves EC (secp256r1) y se guardan
-     * como
-     * "pub_<nombreUsuario>.txt" y "priv_<nombreUsuario>.txt".
+     * como "pub_<nombreUsuario>.txt" y "priv_<nombreUsuario>.txt".
      */
     public void inicializarLlavesPintor(Usuario pintor) {
         if (pintor != null) {
@@ -430,8 +445,10 @@ public class MenuPrincipalConsola {
 
     /**
      * Permite al pintor ingresar la ruta de su llave privada (con ruta base
-     * sugerida claves_usuario/pintores/<NombreUsuario> o claves_usuario/pintor/<NombreUsuario>),
-     * multiplicarla por la llave pública EC del sistema (claves_sistema/pub_sist.txt)
+     * sugerida claves_usuario/pintores/<NombreUsuario> o
+     * claves_usuario/pintor/<NombreUsuario>),
+     * multiplicarla por la llave pública EC del sistema
+     * (claves_sistema/pub_sist.txt)
      * mediante ECDH y generar la llave simétrica AES resultante.
      */
     public SecretKey generarLlaveAESPintor(Usuario pintor) {
@@ -497,7 +514,8 @@ public class MenuPrincipalConsola {
             }
             PublicKey pubSistema = registroECDSA.cargarLlavePublica(pathPubSistema);
 
-            // 3. Multiplicar la llave privada del pintor por la pública del sistema mediante ECDH
+            // 3. Multiplicar la llave privada del pintor por la pública del sistema
+            // mediante ECDH
             SecretKey claveAES = moduloAES.derivarClaveAES(privPintor, pubSistema);
             this.claveAESPintor = claveAES;
 
@@ -512,7 +530,8 @@ public class MenuPrincipalConsola {
             System.out.println(" LLAVE SIMÉTRICA AES GENERADA EXITOSAMENTE (ECDH)");
             System.out.println("==============================================================");
             System.out.println("Pintor:                        " + nombreUsuario);
-            System.out.println("Algoritmo derivado:            " + claveAES.getAlgorithm() + " (" + (claveAES.getEncoded().length * 8) + " bits)");
+            System.out.println("Algoritmo derivado:            " + claveAES.getAlgorithm() + " ("
+                    + (claveAES.getEncoded().length * 8) + " bits)");
             System.out.println("Llave privada cargada (Pintor): " + pathPrivPintor);
             System.out.println("Llave pública multiplicada:    " + pathPubSistema);
             System.out.println("Operación Criptográfica:       d_pintor * Q_sistema -> Derivación SHA-256");
@@ -578,7 +597,7 @@ public class MenuPrincipalConsola {
         }
 
         if (!(motorConfidencialidad instanceof ConfidencialidadAESPort moduloAES)) {
-            System.out.println("[!] El mÃ³dulo de confidencialidad AES no estÃ¡ disponible para cifrar.");
+            System.out.println("[!] El módulo de confidencialidad AES no está disponible para cifrar.");
             return null;
         }
 
@@ -586,7 +605,7 @@ public class MenuPrincipalConsola {
             // 1. Leer los bytes de la imagen original
             byte[] bytesImagen = Files.readAllBytes(pathImagen);
 
-            // 2. Generar Vector de InicializaciÃ³n (IV) de 12 bytes (96 bits) para GCM
+            // 2. Generar Vector de Inicialización (IV) de 12 bytes (96 bits) para GCM
             byte[] iv = moduloAES.generarIV(12);
 
             // 3. Cifrar con AES-GCM (cifrado autenticado con tag de 128 bits)
@@ -600,8 +619,14 @@ public class MenuPrincipalConsola {
             this.ultimaImagenCifrada = resultadoConIV;
             this.ultimoIV = iv;
 
-            // 5. Guardar la imagen cifrada en la carpeta imagenes/ con extensiÃ³n .enc
-            String nombreSalida = pathImagen.getFileName().toString() + ".enc";
+            // 5. Guardar la imagen cifrada en la carpeta imagenes/ con formato:
+            // nombreBase_Cifrado_NombreAutor.<ext>
+            String nombreOriginal = pathImagen.getFileName().toString();
+            int puntoIdx = nombreOriginal.lastIndexOf('.');
+            String nombreBase = (puntoIdx > 0) ? nombreOriginal.substring(0, puntoIdx) : nombreOriginal;
+            String extension = (puntoIdx > 0) ? nombreOriginal.substring(puntoIdx) : "";
+            String nombreSalida = nombreBase + "_Cifrado_" + pintor.getNombreUsuario() + extension;
+
             Path pathSalida = pathImagen.getParent() != null
                     ? pathImagen.getParent().resolve(nombreSalida)
                     : Paths.get("imagenes", nombreSalida);
@@ -609,7 +634,7 @@ public class MenuPrincipalConsola {
             Files.write(pathSalida, resultadoConIV);
             this.ultimaRutaImagenCifrada = pathSalida;
 
-            // 6. Imprimir informaciÃ³n de la imagen cifrada
+            // 6. Imprimir información de la imagen cifrada
             String ivHex = bytesToHex(iv);
             String ivBase64 = Base64.getEncoder().encodeToString(iv);
             String muestraCifradaBase64 = Base64.getEncoder().encodeToString(datosCifrados);
@@ -617,7 +642,7 @@ public class MenuPrincipalConsola {
                 muestraCifradaBase64 = muestraCifradaBase64.substring(0, 64) + "...";
             }
 
-            // Descifrado de prueba para verificar integridad y tag de autenticaciÃ³n
+            // Descifrado de prueba para verificar integridad y tag de autenticación
             byte[] descifradoVerif = moduloAES.descifrarAES_GCM(datosCifrados, claveAES, iv);
             boolean verificacionValida = java.util.Arrays.equals(bytesImagen, descifradoVerif);
 
@@ -626,14 +651,18 @@ public class MenuPrincipalConsola {
             System.out.println("==============================================================");
             System.out.println("Pintor emisor:               " + pintor.getNombreUsuario());
             System.out.println("Archivo de imagen original:  " + pathImagen);
+            System.out.println("Extensión conservada:        "
+                    + (puntoIdx > 0 ? nombreOriginal.substring(puntoIdx) : "(sin extensión)"));
             System.out.println("Tamaño imagen original:      " + bytesImagen.length + " bytes");
             System.out.println("Algoritmo de cifrado:        AES/GCM/NoPadding");
             System.out.println("IV generado (12 bytes):      " + ivHex + " (Base64: " + ivBase64 + ")");
             System.out.println("Tag de autenticación:        128 bits");
             System.out.println("Tamaño de payload cifrado:   " + datosCifrados.length + " bytes");
             System.out.println("Muestra cifrada (Base64):    " + muestraCifradaBase64);
-            System.out.println("Archivo cifrado exportado:   " + pathSalida + " (total: " + resultadoConIV.length + " bytes)");
-            System.out.println("VerificaciÃ³n de Integridad:  " + (verificacionValida ? "VÃLIDA [OK]" : "INVÃLIDA [ERROR]"));
+            System.out.println(
+                    "Archivo cifrado exportado:   " + pathSalida + " (total: " + resultadoConIV.length + " bytes)");
+            System.out.println(
+                    "Verificación de Integridad:  " + (verificacionValida ? "VÁLIDA [OK]" : "INVÁLIDA [ERROR]"));
             System.out.println("==============================================================\n");
 
             return resultadoConIV;
@@ -665,138 +694,125 @@ public class MenuPrincipalConsola {
     }
 
     // =========================================================
-    // CIFRADO DE IMAGEN CON AES-GCM
+    // FIRMA DIGITAL ECDSA DE LA OBRA CIFRADA (INTEGRANTE 2)
     // =========================================================
 
     /**
-     * Solicita al pintor la ruta de la imagen ubicada en "imagenes/",
-     * y la cifra utilizando el modo AES-GCM con la llave AES previamente calculada.
+     * Obtiene el hash matemático (SHA-256) de la obra cifrada,
+     * carga la llave privada del pintor desde
+     * claves_usuario/pintores/<NombreUsuario>/
+     * y genera la firma digital con ECDSA (curva secp256r1, SHA256withECDSA).
+     * Imprime en pantalla la firma digital generada.
      */
-    public byte[] cifrarImagenPintor(Usuario pintor, SecretKey claveAES) {
-        Path dirImagenes = Paths.get("imagenes");
-        try {
-            if (!Files.exists(dirImagenes)) {
-                Files.createDirectories(dirImagenes);
-            }
-        } catch (Exception ignored) {
-        }
-
-        String sugerenciaDefecto = "imagen.png";
-        Path pathSugerido = dirImagenes.resolve(sugerenciaDefecto);
-
-        System.out.println("==============================================================");
-        System.out.println(" CIFRADO AUTENTICADO DE IMAGEN / OBRA (AES-GCM)");
-        System.out.println("==============================================================");
-        System.out.println("Directorio base de imágenes: " + dirImagenes);
-        System.out.print("Ingrese la ruta o nombre de la imagen (ENTER para '" + pathSugerido + "'): ");
-
-        String entrada = scanner.nextLine().trim();
-        Path pathImagen;
-        if (entrada.isEmpty()) {
-            pathImagen = pathSugerido;
-        } else {
-            Path p = Paths.get(entrada);
-            if (!Files.exists(p) && Files.exists(dirImagenes.resolve(entrada))) {
-                pathImagen = dirImagenes.resolve(entrada);
-            } else {
-                pathImagen = p;
-            }
-        }
-
-        return cifrarImagenPintor(pintor, claveAES, pathImagen);
+    public byte[] firmarObraCifradaPintor(Usuario pintor, byte[] datosObraCifrada) {
+        return firmarObraCifradaPintor(pintor, datosObraCifrada, this.ultimaRutaImagenCifrada);
     }
 
-    public byte[] cifrarImagenPintor(Usuario pintor, SecretKey claveAES, Path pathImagen) {
-        if (!Files.exists(pathImagen)) {
-            System.out.println("\n[!] No se encontró el archivo de la imagen en: " + pathImagen);
+    public byte[] firmarObraCifradaPintor(Usuario pintor, byte[] datosObraCifrada, Path rutaObraCifrada) {
+        String nombreUsuario = pintor.getNombreUsuario();
+
+        if (datosObraCifrada == null || datosObraCifrada.length == 0) {
+            System.out.println("\n[!] No hay datos de obra cifrada para firmar.");
             return null;
         }
 
-        if (!(motorConfidencialidad instanceof ConfidencialidadAESPort moduloAES)) {
-            System.out.println("[!] El mÃ³dulo de confidencialidad AES no estÃ¡ disponible para cifrar.");
+        if (!(motorRegistro instanceof RegistroECDSAPort registroECDSA)) {
+            System.out.println("[!] El motor de registro ECDSA no está disponible para firmar la obra.");
+            return null;
+        }
+
+        // Determinar ruta de la llave privada del pintor
+        Path dirBase = Paths.get("claves_usuario", "pintores", nombreUsuario);
+        if (!Files.exists(dirBase) && Files.exists(Paths.get("claves_usuario", "pintor", nombreUsuario))) {
+            dirBase = Paths.get("claves_usuario", "pintor", nombreUsuario);
+        }
+        Path pathPriv = dirBase.resolve("priv_" + nombreUsuario + ".txt");
+
+        if (!Files.exists(pathPriv)) {
+            System.out.println("\n[!] No se encontró la llave privada del pintor en: " + pathPriv);
             return null;
         }
 
         try {
-            // 1. Leer los bytes de la imagen original
-            byte[] bytesImagen = Files.readAllBytes(pathImagen);
+            // 1. Cargar la llave privada del pintor desde
+            // claves_usuario/pintores/<NombreUsuario>
+            PrivateKey privPintor = registroECDSA.cargarLlavePrivada(pathPriv);
 
-            // 2. Generar Vector de InicializaciÃ³n (IV) de 12 bytes (96 bits) para GCM
-            byte[] iv = moduloAES.generarIV(12);
+            // 2. Obtener el hash matemático (SHA-256) de la obra cifrada
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hashObra = md.digest(datosObraCifrada);
+            this.ultimoHashObraCifrada = hashObra;
 
-            // 3. Cifrar con AES-GCM (cifrado autenticado con tag de 128 bits)
-            byte[] datosCifrados = moduloAES.cifrarAES_GCM(bytesImagen, claveAES, iv);
+            // 3. Generar la firma digital ECDSA usando la llave privada del pintor
+            byte[] firmaDigital = registroECDSA.firmarECDSA(datosObraCifrada, privPintor);
+            this.ultimaFirmaDigitalPintor = firmaDigital;
 
-            // 4. Empaquetar IV + Datos Cifrados [IV (12 bytes) + CIFRADO + TAG (16 bytes)]
-            byte[] resultadoConIV = new byte[iv.length + datosCifrados.length];
-            System.arraycopy(iv, 0, resultadoConIV, 0, iv.length);
-            System.arraycopy(datosCifrados, 0, resultadoConIV, iv.length, datosCifrados.length);
+            // 4. Formatear hash y firma en Hexadecimal y Base64
+            String hashHex = bytesToHex(hashObra);
+            String hashBase64 = Base64.getEncoder().encodeToString(hashObra);
 
-            this.ultimaImagenCifrada = resultadoConIV;
-            this.ultimoIV = iv;
+            String firmaHex = bytesToHex(firmaDigital);
+            String firmaBase64 = Base64.getEncoder().encodeToString(firmaDigital);
 
-            // 5. Guardar la imagen cifrada en la carpeta imagenes/ con extensiÃ³n .enc
-            String nombreSalida = pathImagen.getFileName().toString() + ".enc";
-            Path pathSalida = pathImagen.getParent() != null
-                    ? pathImagen.getParent().resolve(nombreSalida)
-                    : Paths.get("imagenes", nombreSalida);
-
-            Files.write(pathSalida, resultadoConIV);
-            this.ultimaRutaImagenCifrada = pathSalida;
-
-            // 6. Imprimir informaciÃ³n de la imagen cifrada
-            String ivHex = bytesToHex(iv);
-            String ivBase64 = Base64.getEncoder().encodeToString(iv);
-            String muestraCifradaBase64 = Base64.getEncoder().encodeToString(datosCifrados);
-            if (muestraCifradaBase64.length() > 64) {
-                muestraCifradaBase64 = muestraCifradaBase64.substring(0, 64) + "...";
+            // 5. Verificar la firma con la llave pública del pintor para certificar
+            // autenticidad
+            Path pathPub = dirBase.resolve("pub_" + nombreUsuario + ".txt");
+            boolean firmaVerificada = false;
+            if (Files.exists(pathPub)) {
+                PublicKey pubPintor = registroECDSA.cargarLlavePublica(pathPub);
+                firmaVerificada = registroECDSA.verificarFirmaECDSA(datosObraCifrada, firmaDigital, pubPintor);
             }
 
-            // Descifrado de prueba para verificar integridad y tag de autenticaciÃ³n
-            byte[] descifradoVerif = moduloAES.descifrarAES_GCM(datosCifrados, claveAES, iv);
-            boolean verificacionValida = java.util.Arrays.equals(bytesImagen, descifradoVerif);
+            // 6. Exportar la firma digital a un archivo .txt en
+            // claves_usuario/pintores/<NombreUsuario>/
+            // Nombre del archivo: "firma_<NombreUsuario>.txt"
+            Path rutaArchivoFirma = dirBase.resolve("firma_" + nombreUsuario + ".txt");
+            registroECDSA.guardarFirmaDigital(firmaDigital, rutaArchivoFirma);
+            this.ultimaRutaFirmaPintor = rutaArchivoFirma;
 
-            System.out.println("\n==============================================================");
-            System.out.println(" IMAGEN CIFRADA CON ÉXITO (AES-GCM - INTEGRANTE 1)");
+            // 7. Imprimir en pantalla la firma digital y los detalles criptográficos
             System.out.println("==============================================================");
-            System.out.println("Pintor emisor:               " + pintor.getNombreUsuario());
-            System.out.println("Archivo de imagen original:  " + pathImagen);
-            System.out.println("Tamaño imagen original:      " + bytesImagen.length + " bytes");
-            System.out.println("Algoritmo de cifrado:        AES/GCM/NoPadding");
-            System.out.println("IV generado (12 bytes):      " + ivHex + " (Base64: " + ivBase64 + ")");
-            System.out.println("Tag de autenticación:        128 bits");
-            System.out.println("Tamaño de payload cifrado:   " + datosCifrados.length + " bytes");
-            System.out.println("Muestra cifrada (Base64):    " + muestraCifradaBase64);
-            System.out.println("Archivo cifrado exportado:   " + pathSalida + " (total: " + resultadoConIV.length + " bytes)");
-            System.out.println("VerificaciÃ³n de Integridad:  " + (verificacionValida ? "VÃLIDA âœ“" : "INVÃLIDA âœ—"));
+            System.out.println(" FIRMA DIGITAL ECDSA DE LA OBRA CIFRADA (INTEGRANTE 2)");
+            System.out.println("==============================================================");
+            System.out.println("Pintor firmante:                " + nombreUsuario);
+            System.out.println(
+                    "Archivo de obra cifrada:        " + (rutaObraCifrada != null ? rutaObraCifrada : "En memoria"));
+            System.out.println("Tamaño de obra cifrada:         " + datosObraCifrada.length + " bytes");
+            System.out.println("Algoritmo de firma digital:     SHA256withECDSA (Curva secp256r1)");
+            System.out.println("Llave privada utilizada:        " + pathPriv);
+            System.out.println("--------------------------------------------------------------");
+            System.out.println("HASH MATEMÁTICO DE LA OBRA CIFRADA (SHA-256):");
+            System.out.println("-> Hexadecimal: " + hashHex);
+            System.out.println("-> Base64:      " + hashBase64);
+            System.out.println("--------------------------------------------------------------");
+            System.out.println("FIRMA DIGITAL RESULTANTE (ECDSA):");
+            System.out.println("-> Longitud:    " + firmaDigital.length + " bytes");
+            System.out.println("-> Hexadecimal: " + firmaHex);
+            System.out.println("-> Base64:      " + firmaBase64);
+            System.out.println("--------------------------------------------------------------");
+            System.out.println("Verificación con Llave Pública: "
+                    + (firmaVerificada ? "VÁLIDA [OK]" : "PENDIENTE / NO VERIFICADA"));
+            System.out.println("Archivo de firma exportado:     " + rutaArchivoFirma);
             System.out.println("==============================================================\n");
 
-            return resultadoConIV;
+            return firmaDigital;
 
         } catch (Exception e) {
-            System.out.println("\n[!] Error durante el cifrado AES-GCM de la imagen: " + e.getMessage());
+            System.out.println("\n[!] Error al generar la firma digital ECDSA: " + e.getMessage());
             return null;
         }
     }
 
-    private static String bytesToHex(byte[] bytes) {
-        StringBuilder sb = new StringBuilder();
-        for (byte b : bytes) {
-            sb.append(String.format("%02X", b));
-        }
-        return sb.toString();
+    public byte[] getUltimaFirmaDigitalPintor() {
+        return ultimaFirmaDigitalPintor;
     }
 
-    public byte[] getUltimaImagenCifrada() {
-        return ultimaImagenCifrada;
+    public byte[] getUltimoHashObraCifrada() {
+        return ultimoHashObraCifrada;
     }
 
-    public byte[] getUltimoIV() {
-        return ultimoIV;
-    }
-
-    public Path getUltimaRutaImagenCifrada() {
-        return ultimaRutaImagenCifrada;
+    public Path getUltimaRutaFirmaPintor() {
+        return ultimaRutaFirmaPintor;
     }
 
     // =========================================================
@@ -904,10 +920,16 @@ public class MenuPrincipalConsola {
             switch (op) {
 
                 case "1":
-                    // Generar llave simétrica AES compartida con el sistema mediante ECDH
+                    // 1. Generar llave simétrica AES compartida con el sistema mediante ECDH
                     SecretKey claveAES = generarLlaveAESPintor(pintor);
                     if (claveAES != null) {
-                        cifrarImagenPintor(pintor, claveAES);
+                        // 2. Cifrar imagen con AES-GCM (conservando extensión original - Opción A)
+                        byte[] obraCifrada = cifrarImagenPintor(pintor, claveAES);
+                        if (obraCifrada != null) {
+                            // 3. Obtener hash y firmar digitalmente la obra cifrada con la llave privada
+                            // del pintor
+                            firmarObraCifradaPintor(pintor, obraCifrada, ultimaRutaImagenCifrada);
+                        }
                     }
                     break;
 
@@ -1067,7 +1089,7 @@ public class MenuPrincipalConsola {
     }
 
     // =========================================================
-    // MENU DEL JUEZ (SIN MODIFICACIONES FUNCIONALES)
+    // MENU DEL JUEZ
     // =========================================================
 
     private void menuJuez(Usuario juez) {
@@ -1083,9 +1105,10 @@ public class MenuPrincipalConsola {
                     "\n--- Panel del Juez ("
                             + juez.getNombreUsuario() + ") ---");
 
-            System.out.println("1. Validar firma ciega de obra anónima");
-            System.out.println("2. Calificar obra");
-            System.out.println("3. Regresar al menú de inicio");
+            System.out.println("1. Ver imágenes");
+            System.out.println("2. Validar firma ciega de obra anónima");
+            System.out.println("3. Calificar obra");
+            System.out.println("4. Regresar al menú de inicio");
             System.out.print("Seleccione una opción: ");
 
             String op = scanner.nextLine().trim();
@@ -1093,6 +1116,10 @@ public class MenuPrincipalConsola {
             switch (op) {
 
                 case "1":
+                    verImagenesJuez();
+                    break;
+
+                case "2":
                     System.out.println(
                             "\n[Simulación]: Verificación con ModuloAnonimatoRSA...");
                     break;
@@ -1113,8 +1140,489 @@ public class MenuPrincipalConsola {
     }
 
     // =========================================================
-    // MENU DEL PRESIDENTE (SIN MODIFICACIONES FUNCIONALES)
+    // CONSULTA Y LISTADO DE IMÁGENES / OBRAS (JUEZ)
     // =========================================================
+
+    /**
+     * Lista los nombres de las obras que se encuentran en la carpeta "imagenes/".
+     * Si existen tanto la imagen normal como la cifrada (o solo la cifrada con
+     * "_cifrada"),
+     * remueve el texto "_cifrada" para mostrar únicamente el nombre de la imagen
+     * sin duplicados.
+     *
+     * @return Lista ordenada con los nombres limpios de las imágenes disponibles.
+     */
+    public static class InfoObraJuez {
+        private final String nombreObra;
+        private final String autor;
+        private final Path rutaArchivoCifrado;
+
+        public InfoObraJuez(String nombreObra, String autor, Path rutaArchivoCifrado) {
+            this.nombreObra = nombreObra;
+            this.autor = autor;
+            this.rutaArchivoCifrado = rutaArchivoCifrado;
+        }
+
+        public String getNombreObra() {
+            return nombreObra;
+        }
+
+        public String getAutor() {
+            return autor;
+        }
+
+        public Path getRutaArchivoCifrado() {
+            return rutaArchivoCifrado;
+        }
+
+        @Override
+        public String toString() {
+            return "Obra: " + nombreObra + " | Autor: " + autor;
+        }
+    }
+
+    /**
+     * Construye el catálogo de obras disponibles analizando los archivos en
+     * "imagenes/".
+     * Extrae el nombre de la obra y el autor a partir del formato:
+     * "nombreBase_Cifrado_NombreAutor.<ext>"
+     *
+     * @return Lista con la información de las obras y sus autores.
+     */
+    public List<InfoObraJuez> obtenerCatalogoObrasJuez() {
+        Path dirImagenes = Paths.get("imagenes");
+        if (!Files.exists(dirImagenes) || !Files.isDirectory(dirImagenes)) {
+            return new ArrayList<>();
+        }
+
+        Map<String, InfoObraJuez> catalogo = new LinkedHashMap<>();
+
+        try (Stream<Path> stream = Files.list(dirImagenes)) {
+            List<Path> archivos = stream.filter(Files::isRegularFile).sorted().toList();
+
+            // 1. Procesar obras cifradas con formato nuevo:
+            // nombreBase_Cifrado_NombreAutor.<ext>
+            for (Path p : archivos) {
+                String nombre = p.getFileName().toString();
+                int idx = nombre.toLowerCase().indexOf("_cifrado_");
+                if (idx != -1) {
+                    String nombreBase = nombre.substring(0, idx);
+                    String resto = nombre.substring(idx + "_cifrado_".length());
+                    int dotIdx = resto.lastIndexOf('.');
+                    String autor;
+                    String ext;
+                    if (dotIdx > 0) {
+                        autor = resto.substring(0, dotIdx);
+                        ext = resto.substring(dotIdx);
+                    } else {
+                        autor = resto;
+                        ext = "";
+                    }
+                    String nombreObra = nombreBase + ext;
+                    catalogo.put(nombreObra.toLowerCase(), new InfoObraJuez(nombreObra, autor, p));
+                }
+            }
+
+            // 2. Procesar obras con formato anterior (_cifrada) si existieran
+            for (Path p : archivos) {
+                String nombre = p.getFileName().toString();
+                if (nombre.toLowerCase().contains("_cifrada")) {
+                    String nombreObra = nombre.replace("_cifrada", "");
+                    if (!catalogo.containsKey(nombreObra.toLowerCase())) {
+                        catalogo.put(nombreObra.toLowerCase(), new InfoObraJuez(nombreObra, "Desconocido", p));
+                    }
+                }
+            }
+
+            // 3. Añadir imágenes sin cifrar que no estén ya en el catálogo
+            for (Path p : archivos) {
+                String nombre = p.getFileName().toString();
+                if (!nombre.toLowerCase().contains("_cifrado_") && !nombre.toLowerCase().contains("_cifrada")) {
+                    String key = nombre.toLowerCase();
+                    if (!catalogo.containsKey(key)) {
+                        catalogo.put(key, new InfoObraJuez(nombre, "Sin registrar", null));
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            System.out.println("[!] Error al leer el catálogo de imágenes: " + e.getMessage());
+        }
+
+        return new ArrayList<>(catalogo.values());
+    }
+
+    public List<String> obtenerNombresImagenes() {
+        return obtenerCatalogoObrasJuez().stream()
+                .map(InfoObraJuez::getNombreObra)
+                .toList();
+    }
+
+    /**
+     * Muestra en pantalla el catálogo de imágenes para el Juez indicando el nombre
+     * de la obra
+     * y el nombre del pintor autor (extraído del formato
+     * nombreBase_Cifrado_NombreAutor).
+     * El Juez solo debe seleccionar el número de la obra y el sistema identifica al
+     * autor
+     * automáticamente para realizar la verificación criptográfica.
+     */
+    public void verImagenesJuez() {
+        System.out.println("\n==============================================================");
+        System.out.println(" CATÁLOGO DE IMÁGENES / OBRAS REGISTRADAS (PANEL DEL JUEZ)");
+        System.out.println("==============================================================");
+        System.out.println("Directorio de imágenes: imagenes/");
+
+        List<InfoObraJuez> catalogo = obtenerCatalogoObrasJuez();
+
+        if (catalogo.isEmpty()) {
+            System.out.println("\n[!] No se encontraron imágenes en la carpeta 'imagenes/'.");
+            System.out.println("==============================================================\n");
+            return;
+        }
+
+        System.out.println("\nTotal de obras registradas: " + catalogo.size());
+        System.out.println("--------------------------------------------------------------");
+        for (int i = 0; i < catalogo.size(); i++) {
+            InfoObraJuez obra = catalogo.get(i);
+            System.out.printf("  [%d] Obra: %s | Autor: %s%n", (i + 1), obra.getNombreObra(), obra.getAutor());
+        }
+        System.out.println("--------------------------------------------------------------");
+
+        System.out.print("Seleccione el número de la obra a analizar (ENTER o 0 para volver): ");
+        String seleccion = scanner.nextLine().trim();
+
+        if (seleccion.isEmpty() || seleccion.equals("0")) {
+            return;
+        }
+
+        int index;
+        try {
+            index = Integer.parseInt(seleccion);
+        } catch (NumberFormatException e) {
+            System.out.println("\n[!] Entrada no válida. Debe ingresar un número de la lista.");
+            return;
+        }
+
+        if (index < 1 || index > catalogo.size()) {
+            System.out.println("\n[!] Número de obra fuera de rango.");
+            return;
+        }
+
+        // Se toma la obra seleccionada y su autor detectado automáticamente
+        InfoObraJuez obraElegida = catalogo.get(index - 1);
+        System.out.println("\n>> Obra seleccionada:  " + obraElegida.getNombreObra());
+        System.out.println(">> Autor identificado: " + obraElegida.getAutor());
+
+        if (obraElegida.getAutor().equalsIgnoreCase("Sin registrar")
+                || obraElegida.getAutor().equalsIgnoreCase("Desconocido")) {
+            System.out.println("\n[!] Esta obra no cuenta con un autor identificado o no ha sido cifrada/firmada.");
+            System.out.println("INVALIDA");
+            return;
+        }
+
+        verificarFirmaObraPintor(obraElegida.getNombreObra(), obraElegida.getAutor());
+    }
+
+    /**
+     * Verifica la autenticidad e integridad de la firma digital de una obra
+     * seleccionada.
+     * Carga la llave pública del pintor en
+     * "claves_usuario/pintores/<NombreUsuario>/pub_<NombreUsuario>"
+     * y la firma en
+     * "claves_usuario/pintores/<NombreUsuario>/firma_<NombreUsuario>".
+     * Imprime en consola "VALIDA" si no hubo cambios o "INVALIDA" si hubo
+     * modificaciones.
+     *
+     * @param nombreObra   Nombre de la obra elegida (ej. "bandera.bmp" o
+     *                     "mona_lisa_Cifrado_davinci.bmp").
+     * @param nombrePintor Nombre de usuario del pintor (ej. "moi", "davinci").
+     * @return true si la firma es válida, false en caso contrario.
+     */
+    public boolean verificarFirmaObraPintor(String nombreObra, String nombrePintor) {
+        if (!(motorRegistro instanceof RegistroECDSAPort registroECDSA)) {
+            System.out.println("[!] El motor de registro ECDSA no está disponible.");
+            System.out.println("INVALIDA");
+            return false;
+        }
+
+        Path dirPintor = Paths.get("claves_usuario", "pintores", nombrePintor);
+        if (!Files.exists(dirPintor) && Files.exists(Paths.get("claves_usuario", "pintor", nombrePintor))) {
+            dirPintor = Paths.get("claves_usuario", "pintor", nombrePintor);
+        }
+
+        Path pathPub = dirPintor.resolve("pub_" + nombrePintor + ".txt");
+        if (!Files.exists(pathPub)) {
+            pathPub = dirPintor.resolve("pub_" + nombrePintor);
+        }
+
+        if (!Files.exists(pathPub)) {
+            System.out.println("\n[!] No se encontró la llave pública del pintor en: " + pathPub);
+            System.out.println("INVALIDA");
+            return false;
+        }
+
+        Path pathFirma = dirPintor.resolve("firma_" + nombrePintor + ".txt");
+        if (!Files.exists(pathFirma)) {
+            pathFirma = dirPintor.resolve("firma_" + nombrePintor);
+        }
+
+        if (!Files.exists(pathFirma)) {
+            System.out.println("\n[!] No se encontró el archivo de firma del pintor en: " + pathFirma);
+            System.out.println("INVALIDA");
+            return false;
+        }
+
+        // Localizar el archivo cifrado de la obra en imagenes/
+        int puntoIdx = nombreObra.lastIndexOf('.');
+        String nombreBase = (puntoIdx > 0) ? nombreObra.substring(0, puntoIdx) : nombreObra;
+        String extension = (puntoIdx > 0) ? nombreObra.substring(puntoIdx) : "";
+
+        Path pathObra = Paths.get("imagenes", nombreBase + "_Cifrado_" + nombrePintor + extension);
+        if (!Files.exists(pathObra)) {
+            pathObra = Paths.get("imagenes", nombreObra);
+        }
+        if (!Files.exists(pathObra)) {
+            pathObra = Paths.get("imagenes", nombreBase + "_cifrada" + extension);
+        }
+        if (!Files.exists(pathObra)) {
+            System.out.println("\n[!] No se encontró el archivo de la obra en: " + pathObra);
+            System.out.println("INVALIDA");
+            return false;
+        }
+
+        try {
+            byte[] datosObra = Files.readAllBytes(pathObra);
+            PublicKey pubPintor = registroECDSA.cargarLlavePublica(pathPub);
+            byte[] firma = registroECDSA.cargarFirmaDigital(pathFirma);
+
+            boolean esValida = registroECDSA.verificarFirmaECDSA(datosObra, firma, pubPintor);
+
+            System.out.println("\n==============================================================");
+            System.out.println(" ANÁLISIS DE AUTENTICIDAD E INTEGRIDAD DE LA OBRA (ECDSA)");
+            System.out.println("==============================================================");
+            System.out.println("Obra seleccionada:        " + pathObra);
+            System.out.println("Pintor / Autor:           " + nombrePintor);
+            System.out.println("Llave pública utilizada:  " + pathPub);
+            System.out.println("Archivo de firma:         " + pathFirma);
+            System.out.println("Algoritmo de firma:       SHA256withECDSA (Curva secp256r1)");
+
+            if (esValida) {
+                System.out.println("\n>> RESULTADO: VALIDA");
+                System.out.println(">> La obra es auténtica y no sufrió ninguna modificación.");
+
+                // Si la firma es válida, el sistema toma su llave privada en
+                // "claves_sistema/piv_sist.txt"
+                // y se multiplica por la llave pública del pintor para recuperar e imprimir la
+                // llave AES
+                SecretKey claveRecuperada = recuperarLlaveAESSistema(nombrePintor);
+
+                // Después de recuperar la llave AES, se descifra la imagen cifrada seleccionada
+                // por el juez
+                if (claveRecuperada != null) {
+                    descifrarImagenObra(pathObra, nombreObra, nombrePintor, claveRecuperada);
+                }
+            } else {
+                System.out.println("\n>> RESULTADO: INVALIDA");
+                System.out.println(
+                        ">> [ALERTA] La firma no coincide o la obra fue alterada. No se descifrará la imagen.");
+            }
+            System.out.println("==============================================================\n");
+
+            return esValida;
+        } catch (Exception e) {
+            System.out.println("\n[!] Error durante la verificación criptográfica: " + e.getMessage());
+            System.out.println("INVALIDA");
+            return false;
+        }
+    }
+
+    /**
+     * Recupera la llave simétrica AES cuando la firma digital es válida.
+     * El sistema toma su llave privada en "claves_sistema/piv_sist.txt" (o
+     * "claves_sistema/priv_sist.txt")
+     * y se multiplica por la llave pública del pintor guardada en
+     * "claves_usuario/pintores/<nombreUsuario>/pub_<nombreUsuario>"
+     * mediante ECDH (d_sistema * Q_pintor) para recuperar la llave AES compartida.
+     * Imprime en consola la llave AES recuperada.
+     *
+     * @param nombrePintor Nombre de usuario autor de la obra.
+     * @return SecretKey AES recuperada, o null si falla.
+     */
+    public SecretKey recuperarLlaveAESSistema(String nombrePintor) {
+        if (!(motorRegistro instanceof RegistroECDSAPort registroECDSA)) {
+            System.out.println("[!] El motor de registro ECDSA no está disponible para cargar llaves.");
+            return null;
+        }
+
+        if (!(motorConfidencialidad instanceof ConfidencialidadAESPort moduloAES)) {
+            System.out.println("[!] El módulo de confidencialidad AES no está disponible para derivar la clave.");
+            return null;
+        }
+
+        try {
+            // 1. Tomar llave privada del sistema desde "claves_sistema/piv_sist.txt" (o
+            // "claves_sistema/priv_sist.txt")
+            Path pathPrivSistema = Paths.get("claves_sistema", "piv_sist.txt");
+            if (!Files.exists(pathPrivSistema)) {
+                pathPrivSistema = Paths.get("claves_sistema", "priv_sist.txt");
+            }
+            if (!Files.exists(pathPrivSistema)) {
+                pathPrivSistema = Paths.get("claves_sistema", "piv_sist");
+            }
+            if (!Files.exists(pathPrivSistema)) {
+                pathPrivSistema = Paths.get("claves_sistema", "priv_sist");
+            }
+
+            if (!Files.exists(pathPrivSistema)) {
+                System.out
+                        .println("\n[!] No se encontró la llave privada del sistema en 'claves_sistema/piv_sist.txt'");
+                return null;
+            }
+
+            PrivateKey privSistema = registroECDSA.cargarLlavePrivada(pathPrivSistema);
+
+            // 2. Tomar llave pública del pintor guardada en
+            // "claves_usuario/pintores/<nombreUsuario>/pub_<nombreUsuario>"
+            Path dirPintor = Paths.get("claves_usuario", "pintores", nombrePintor);
+            if (!Files.exists(dirPintor) && Files.exists(Paths.get("claves_usuario", "pintor", nombrePintor))) {
+                dirPintor = Paths.get("claves_usuario", "pintor", nombrePintor);
+            }
+
+            Path pathPubPintor = dirPintor.resolve("pub_" + nombrePintor);
+            if (!Files.exists(pathPubPintor)) {
+                pathPubPintor = dirPintor.resolve("pub_" + nombrePintor + ".txt");
+            }
+
+            if (!Files.exists(pathPubPintor)) {
+                System.out.println("\n[!] No se encontró la llave pública del pintor en: " + pathPubPintor);
+                return null;
+            }
+
+            PublicKey pubPintor = registroECDSA.cargarLlavePublica(pathPubPintor);
+
+            // 3. Multiplicar la llave privada del sistema por la llave pública del pintor
+            // mediante ECDH
+            SecretKey claveAES = moduloAES.derivarClaveAES(privSistema, pubPintor);
+            this.ultimaClaveAESRecuperada = claveAES;
+
+            // 4. Imprimir en consola la llave AES generada/recuperada
+            String claveBase64 = Base64.getEncoder().encodeToString(claveAES.getEncoded());
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : claveAES.getEncoded()) {
+                hexString.append(String.format("%02X", b));
+            }
+
+            System.out.println("\n==============================================================");
+            System.out.println(" LLAVE AES RECUPERADA POR EL SISTEMA (ECDH: d_sistema * Q_pintor)");
+            System.out.println("==============================================================");
+            System.out.println("Autor / Pintor:                " + nombrePintor);
+            System.out.println("Llave privada del sistema:     " + pathPrivSistema);
+            System.out.println("Llave pública del pintor:      " + pathPubPintor);
+            System.out.println("Operación Criptográfica:       d_sistema * Q_pintor -> Derivación SHA-256 (ECDH)");
+            System.out.println("Algoritmo derivado:            " + claveAES.getAlgorithm() + " ("
+                    + (claveAES.getEncoded().length * 8) + " bits)");
+            System.out.println("--------------------------------------------------------------");
+            System.out.println("LLAVE AES RECUPERADA (Hex):    " + hexString);
+            System.out.println("LLAVE AES RECUPERADA (Base64): " + claveBase64);
+            System.out.println("==============================================================\n");
+
+            return claveAES;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error al recuperar la llave AES del sistema: " + e.getMessage());
+            return null;
+        }
+    }
+
+    public SecretKey getUltimaClaveAESRecuperada() {
+        return ultimaClaveAESRecuperada;
+    }
+
+    /**
+     * Descifra la imagen cifrada seleccionada por el juez utilizando la llave AES
+     * recuperada.
+     * Guarda la imagen descifrada en la carpeta "imagenes" con el formato:
+     * "nombreBase_descifrada_nombreUsuario.<ext>"
+     *
+     * @param pathObraCifrada Ruta física del archivo cifrado en imagenes/
+     * @param nombreObra      Nombre de la obra elegida
+     * @param nombrePintor    Nombre de usuario autor de la obra
+     * @param claveAES        Llave simétrica AES recuperada mediante ECDH
+     * @return Path del archivo descifrado guardado en imagenes/, o null en caso de
+     *         error.
+     */
+    public Path descifrarImagenObra(Path pathObraCifrada, String nombreObra, String nombrePintor, SecretKey claveAES) {
+        if (!(motorConfidencialidad instanceof ConfidencialidadAESPort moduloAES)) {
+            System.out.println("[!] El módulo de confidencialidad AES no está disponible para descifrar.");
+            return null;
+        }
+
+        try {
+            // 1. Leer el archivo cifrado completo [IV (12 bytes) + CIFRADO + TAG (16
+            // bytes)]
+            byte[] contenidoCifrado = Files.readAllBytes(pathObraCifrada);
+            if (contenidoCifrado.length < 28) {
+                System.out.println("[!] El archivo cifrado no contiene la longitud mínima necesaria (IV + Tag).");
+                return null;
+            }
+
+            // 2. Extraer el IV (primeros 12 bytes) y los datos cifrados con el tag
+            byte[] iv = new byte[12];
+            System.arraycopy(contenidoCifrado, 0, iv, 0, 12);
+
+            byte[] datosCifrados = new byte[contenidoCifrado.length - 12];
+            System.arraycopy(contenidoCifrado, 12, datosCifrados, 0, datosCifrados.length);
+
+            // 3. Descifrar con AES-GCM usando la llave AES recuperada
+            byte[] datosDescifrados = moduloAES.descifrarAES_GCM(datosCifrados, claveAES, iv);
+
+            // 4. Determinar nombre de salida en imagenes/:
+            // "nombreBase_descifrada_nombreUsuario.<ext>"
+            String nombreArchivo = pathObraCifrada.getFileName().toString();
+            String extension = "";
+            int puntoIdx = nombreArchivo.lastIndexOf('.');
+            if (puntoIdx > 0) {
+                extension = nombreArchivo.substring(puntoIdx);
+                nombreArchivo = nombreArchivo.substring(0, puntoIdx);
+            }
+
+            // Quitar sufijos como _Cifrado_<autor> o _cifrada si estuvieran presentes
+            int idxCifrado = nombreArchivo.toLowerCase().indexOf("_cifrad");
+            String nombreBase = (idxCifrado > 0) ? nombreArchivo.substring(0, idxCifrado) : nombreArchivo;
+
+            String nombreArchivoDescifrado = nombreBase + "_descifrada_" + nombrePintor + extension;
+            Path dirImagenes = Paths.get("imagenes");
+            Files.createDirectories(dirImagenes);
+            Path pathDescifrado = dirImagenes.resolve(nombreArchivoDescifrado);
+
+            // 5. Guardar la imagen descifrada en disco
+            Files.write(pathDescifrado, datosDescifrados);
+            this.ultimaRutaImagenDescifrada = pathDescifrado;
+
+            // 6. Imprimir información del descifrado en consola
+            System.out.println("==============================================================");
+            System.out.println(" IMAGEN DESCIFRADA CON ÉXITO (AES-GCM - INTEGRANTE 1)");
+            System.out.println("==============================================================");
+            System.out.println("Archivo cifrado procesado:     " + pathObraCifrada);
+            System.out.println("Autor / Pintor:                " + nombrePintor);
+            System.out.println("Algoritmo de descifrado:       AES/GCM/NoPadding (256 bits)");
+            System.out.println("IV utilizado (12 bytes Hex):   " + bytesToHex(iv));
+            System.out.println("Tamaño de imagen descifrada:   " + datosDescifrados.length + " bytes");
+            System.out.println("Archivo descifrado guardado:   " + pathDescifrado);
+            System.out.println("==============================================================\n");
+
+            return pathDescifrado;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error al descifrar la obra con AES-GCM: " + e.getMessage());
+            return null;
+        }
+    }
+
+    public Path getUltimaRutaImagenDescifrada() {
+        return ultimaRutaImagenDescifrada;
+    }
 
     private void menuPresidente(Usuario presidente) {
 

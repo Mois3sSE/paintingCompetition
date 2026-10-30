@@ -1,4 +1,3 @@
-
 package com.paintingcompetition.infrastructure.adapters.out.crypto;
 
 import java.io.IOException;
@@ -43,8 +42,7 @@ public class ModuloRegistroECDSA implements RegistroECDSAPort {
     private static final String CURVA = "secp256r1";
     private static final String ALGORITMO_FIRMA = "SHA256withECDSA";
 
-    private static final Provider PROVEEDOR_BC =
-            new BouncyCastleProvider();
+    private static final Provider PROVEEDOR_BC = new BouncyCastleProvider();
 
     // =========================================================
     // IMPLEMENTACION DEL PUERTO GENERICO
@@ -61,8 +59,7 @@ public class ModuloRegistroECDSA implements RegistroECDSAPort {
 
         if (!(clavePrivada instanceof PrivateKey)) {
             throw new IllegalArgumentException(
-                    "Se requiere una llave privada valida."
-            );
+                    "Se requiere una llave privada valida.");
         }
 
         // Delegar al metodo especifico de ECDSA.
@@ -89,61 +86,51 @@ public class ModuloRegistroECDSA implements RegistroECDSAPort {
 
         try {
 
-            KeyPairGenerator generador =
-                    KeyPairGenerator.getInstance(
-                            "EC", PROVEEDOR_BC
-                    );
+            KeyPairGenerator generador = KeyPairGenerator.getInstance(
+                    "EC", PROVEEDOR_BC);
 
-            ECGenParameterSpec parametros =
-                    new ECGenParameterSpec(CURVA);
+            ECGenParameterSpec parametros = new ECGenParameterSpec(CURVA);
 
             generador.initialize(
                     parametros,
-                    new SecureRandom()
-            );
+                    new SecureRandom());
 
             return generador.generateKeyPair();
 
         } catch (GeneralSecurityException e) {
 
             throw new IllegalStateException(
-                    "Error al generar las llaves ECDSA.", e
-            );
+                    "Error al generar las llaves ECDSA.", e);
         }
     }
 
     /**
      * Firma digitalmente los datos utilizando SHA-256 y ECDSA.
      *
-     * @param mensaje Bytes del mensaje o archivo a firmar.
+     * @param mensaje      Bytes del mensaje o archivo a firmar.
      * @param clavePrivada Llave privada del Pintor.
      * @return Firma digital en bytes.
      */
     public byte[] firmarECDSA(
             byte[] mensaje,
-            PrivateKey clavePrivada
-    ) {
+            PrivateKey clavePrivada) {
 
         Objects.requireNonNull(
-                mensaje, "El mensaje no puede ser null."
-        );
+                mensaje, "El mensaje no puede ser null.");
 
         Objects.requireNonNull(
-                clavePrivada, "La llave privada no puede ser null."
-        );
+                clavePrivada, "La llave privada no puede ser null.");
 
         try {
 
             Signature firmador = Signature.getInstance(
                     ALGORITMO_FIRMA,
-                    PROVEEDOR_BC
-            );
+                    PROVEEDOR_BC);
 
             // Inicializar con la llave privada del Pintor.
             firmador.initSign(
                     clavePrivada,
-                    new SecureRandom()
-            );
+                    new SecureRandom());
 
             // SHA256withECDSA calcula el hash internamente.
             firmador.update(mensaje);
@@ -154,43 +141,37 @@ public class ModuloRegistroECDSA implements RegistroECDSAPort {
         } catch (GeneralSecurityException e) {
 
             throw new IllegalStateException(
-                    "Error al generar la firma ECDSA.", e
-            );
+                    "Error al generar la firma ECDSA.", e);
         }
     }
 
     /**
      * Verifica la autenticidad e integridad de una firma.
      *
-     * @param mensaje Datos originales que fueron firmados.
-     * @param firma Firma digital recibida.
+     * @param mensaje      Datos originales que fueron firmados.
+     * @param firma        Firma digital recibida.
      * @param clavePublica Llave publica del firmante.
      * @return true si la firma es valida; false si no lo es.
      */
     public boolean verificarFirmaECDSA(
             byte[] mensaje,
             byte[] firma,
-            PublicKey clavePublica
-    ) {
+            PublicKey clavePublica) {
 
         Objects.requireNonNull(
-                mensaje, "El mensaje no puede ser null."
-        );
+                mensaje, "El mensaje no puede ser null.");
 
         Objects.requireNonNull(
-                firma, "La firma no puede ser null."
-        );
+                firma, "La firma no puede ser null.");
 
         Objects.requireNonNull(
-                clavePublica, "La llave publica no puede ser null."
-        );
+                clavePublica, "La llave publica no puede ser null.");
 
         try {
 
             Signature verificador = Signature.getInstance(
                     ALGORITMO_FIRMA,
-                    PROVEEDOR_BC
-            );
+                    PROVEEDOR_BC);
 
             // Inicializar con la llave publica del Pintor.
             verificador.initVerify(clavePublica);
@@ -209,8 +190,7 @@ public class ModuloRegistroECDSA implements RegistroECDSAPort {
         } catch (GeneralSecurityException e) {
 
             throw new IllegalStateException(
-                    "Error al verificar la firma ECDSA.", e
-            );
+                    "Error al verificar la firma ECDSA.", e);
         }
     }
 
@@ -264,5 +244,31 @@ public class ModuloRegistroECDSA implements RegistroECDSAPort {
         byte[] bytes = Base64.getDecoder().decode(contenido);
         KeyFactory kf = KeyFactory.getInstance("EC", PROVEEDOR_BC);
         return kf.generatePrivate(new PKCS8EncodedKeySpec(bytes));
+    }
+
+    // =========================================================
+    // PERSISTENCIA Y CARGA DE FIRMAS DIGITALES ECDSA (INTEGRANTE 2)
+    // =========================================================
+
+    @Override
+    public void guardarFirmaDigital(byte[] firma, Path rutaArchivo) throws IOException {
+        Objects.requireNonNull(firma, "La firma digital no puede ser nula.");
+        Objects.requireNonNull(rutaArchivo, "La ruta de archivo no puede ser nula.");
+
+        if (rutaArchivo.getParent() != null) {
+            Files.createDirectories(rutaArchivo.getParent());
+        }
+        String b64 = Base64.getEncoder().encodeToString(firma);
+        Files.writeString(rutaArchivo, b64, StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public byte[] cargarFirmaDigital(Path rutaArchivo) throws Exception {
+        Objects.requireNonNull(rutaArchivo, "La ruta de archivo no puede ser nula.");
+        if (!Files.exists(rutaArchivo)) {
+            throw new IOException("El archivo de firma digital no existe: " + rutaArchivo);
+        }
+        String contenido = Files.readString(rutaArchivo, StandardCharsets.UTF_8).trim();
+        return Base64.getDecoder().decode(contenido);
     }
 }
