@@ -24,8 +24,24 @@ import java.security.PublicKey;
 import java.nio.file.Path;
 
 import com.paintingcompetition.domain.ports.out.RegistroECDSAPort;
+import com.paintingcompetition.domain.ports.out.ConfidencialidadAESPort;
+import javax.crypto.SecretKey;
 
 public class MenuPrincipalConsola {
+
+    // =========================================================
+    // ARREGLOS DE CREDENCIALES SIMULADAS [Nombre de Usuario, Contraseña]
+    // =========================================================
+    private static final String[][] USUARIOS_JUEZ = {
+            { "juez1", "1234" },
+            { "juez2", "juez2026" },
+            { "juez3", "juezPass" },
+            { "carlos", "clave123" }
+    };
+
+    private static final String[][] USUARIOS_PRESIDENTE = {
+            { "presidente", "admin123" },
+    };
 
     private final Scanner scanner;
     private final MotorCriptograficoPort motorConfidencialidad;
@@ -33,6 +49,30 @@ public class MenuPrincipalConsola {
     private final MotorCriptograficoPort motorAnonimato;
     private final ModuloFirmaRSAPSS moduloPSS;
     private final GestorArchivosActaAdapter gestorActaIO;
+
+    // Llaves criptográficas EC (secp256r1) del sistema en general
+    private PublicKey llavePublicaSistema;
+    private PrivateKey llavePrivadaSistema;
+
+    // Llaves criptográficas EC (secp256r1) del presidente
+    private PublicKey llavePublicaPresidente;
+    private PrivateKey llavePrivadaPresidente;
+
+    // Llaves criptográficas EC (secp256r1) del juez autenticado
+    private PublicKey llavePublicaJuez;
+    private PrivateKey llavePrivadaJuez;
+
+    // Llaves criptográficas EC (secp256r1) del pintor autenticado
+    private PublicKey llavePublicaPintor;
+    private PrivateKey llavePrivadaPintor;
+
+    // Llave simétrica AES derivada por el pintor mediante ECDH con la llave pública del sistema
+    private SecretKey claveAESPintor;
+
+    // Última imagen cifrada del pintor en la sesión
+    private byte[] ultimaImagenCifrada;
+    private byte[] ultimoIV;
+    private Path ultimaRutaImagenCifrada;
 
     public MenuPrincipalConsola(
             MotorCriptograficoPort motorConfidencialidad,
@@ -49,19 +89,20 @@ public class MenuPrincipalConsola {
 
     public void iniciar() {
 
-        boolean salir = false;
-
         System.out.println("========================================================");
         System.out.println(" SISTEMA DE CONCURSO DE PINTURA (CORE CRIPTOGRÁFICO)");
         System.out.println("========================================================");
 
+        // Inicializar llaves EC del sistema (cargar si existen o generar si no existen)
+        inicializarLlavesSistema();
+
+        boolean salir = false;
+
         while (!salir) {
 
             System.out.println("\n--- Menú Principal: Inicio de Sesión Simulado ---");
-            System.out.println("1. Entrar como Pintor");
-            System.out.println("2. Entrar como Juez");
-            System.out.println("3. Entrar como Presidente");
-            System.out.println("4. Salir");
+            System.out.println("1. Iniciar sesión");
+            System.out.println("2. Salir");
             System.out.print("Seleccione una opción: ");
 
             String opcion = scanner.nextLine().trim();
@@ -69,96 +110,770 @@ public class MenuPrincipalConsola {
             switch (opcion) {
 
                 case "1":
-                    loginPintor();
-                    break;
-
-                case "2":
-                    loginJuez();
+                    iniciarSesion();
                     break;
 
                 case "3":
-                    loginPresidente();
-                    break;
-
-                case "4":
                     System.out.println("\nSaliendo del sistema. ");
                     salir = true;
                     break;
 
                 default:
-                    System.out.println("\n[!] Opción no válida. Por favor ingrese 1, 2, 3 o 4.");
+                    System.out.println("\n[!] Opción no válida. Por favor ingrese 1 o 2.");
             }
         }
     }
 
     // =========================================================
-    // INICIO DE SESION POR ACTOR
+    // INICIALIZACIÓN DE LLAVES EC DEL SISTEMA
     // =========================================================
 
-    private void loginPintor() {
+    /**
+     * Inicializa las llaves EC públicas y privadas del sistema en general.
+     * Si ya existen en la carpeta "claves_sistema", se cargan sin volver a
+     * generarlas.
+     * Si no existen, se genera un nuevo par de llaves EC (secp256r1) y se guardan
+     * como
+     * "pub_sist.txt" y "priv_sist.txt".
+     */
+    private void inicializarLlavesSistema() {
+        Path dirClaves = Paths.get("claves_sistema");
+        Path pathPub = dirClaves.resolve("pub_sist.txt");
+        Path pathPriv = dirClaves.resolve("priv_sist.txt");
 
-        System.out.print("\nIngrese su nombre de Pintor/Autor: ");
+        if (!(motorRegistro instanceof RegistroECDSAPort registroECDSA)) {
+            System.out.println(
+                    "[!] El motor de registro ECDSA no está disponible para gestionar las llaves del sistema.");
+            return;
+        }
+
+        try {
+            if (Files.exists(pathPub) && Files.exists(pathPriv)) {
+                this.llavePublicaSistema = registroECDSA.cargarLlavePublica(pathPub);
+                this.llavePrivadaSistema = registroECDSA.cargarLlavePrivada(pathPriv);
+                System.out
+                        .println("\n[SISTEMA] Llaves criptográficas EC del sistema detectadas en '" + dirClaves + "'.");
+                System.out.println("          -> Llave pública cargada: " + pathPub);
+                System.out.println("          -> Llave privada cargada: " + pathPriv);
+            } else {
+                System.out.println("\n[SISTEMA] No se encontraron llaves previas del sistema.");
+                System.out.println("[SISTEMA] Generando nuevo par de llaves EC (secp256r1) para el sistema...");
+                KeyPair parLlaves = registroECDSA.generarParLlavesECDSA();
+                this.llavePublicaSistema = parLlaves.getPublic();
+                this.llavePrivadaSistema = parLlaves.getPrivate();
+
+                registroECDSA.guardarLlavePublica(this.llavePublicaSistema, pathPub);
+                registroECDSA.guardarLlavePrivada(this.llavePrivadaSistema, pathPriv);
+
+                System.out.println("[SISTEMA] Llaves del sistema generadas y guardadas exitosamente:");
+                System.out.println("          -> Llave pública: " + pathPub);
+                System.out.println("          -> Llave privada: " + pathPriv);
+            }
+        } catch (Exception e) {
+            System.out.println("[!] Error al gestionar las llaves del sistema: " + e.getMessage());
+        }
+    }
+
+    public PublicKey getLlavePublicaSistema() {
+        return llavePublicaSistema;
+    }
+
+    public PrivateKey getLlavePrivadaSistema() {
+        return llavePrivadaSistema;
+    }
+
+    // =========================================================
+    // INICIALIZACIÓN DE LLAVES EC DEL PRESIDENTE
+    // =========================================================
+
+    /**
+     * Inicializa las llaves EC públicas y privadas del presidente.
+     * Si ya existen en la carpeta "claves_usuario/presidente", se cargan sin volver
+     * a generarlas.
+     * Si no existen, se genera un nuevo par de llaves EC (secp256r1) y se guardan
+     * como
+     * "pub_presidente.txt" y "priv_presidente.txt".
+     */
+    public void inicializarLlavesPresidente() {
+        Path dirClaves = Paths.get("claves_usuario", "presidente");
+        Path pathPub = dirClaves.resolve("pub_presidente.txt");
+        Path pathPriv = dirClaves.resolve("priv_presidente.txt");
+
+        if (!(motorRegistro instanceof RegistroECDSAPort registroECDSA)) {
+            System.out.println(
+                    "[!] El motor de registro ECDSA no está disponible para gestionar las llaves del presidente.");
+            return;
+        }
+
+        try {
+            if (Files.exists(pathPub) && Files.exists(pathPriv)) {
+                try {
+                    this.llavePublicaPresidente = registroECDSA.cargarLlavePublica(pathPub);
+                    this.llavePrivadaPresidente = registroECDSA.cargarLlavePrivada(pathPriv);
+                    System.out.println("\n[PRESIDENTE] Llaves criptográficas EC del presidente detectadas en '"
+                            + dirClaves + "'.");
+                    System.out.println("             -> Llave pública cargada: " + pathPub);
+                    System.out.println("             -> Llave privada cargada: " + pathPriv);
+                    return;
+                } catch (Exception ex) {
+                    System.out.println("\n[PRESIDENTE] Las llaves en '" + dirClaves
+                            + "' no son de tipo EC válidas o están dañadas: " + ex.getMessage());
+                    System.out.println("[PRESIDENTE] Regenerando llaves EC para el presidente...");
+                }
+            } else {
+                System.out.println("\n[PRESIDENTE] No se encontraron llaves previas del presidente.");
+                System.out.println("[PRESIDENTE] Generando nuevo par de llaves EC (secp256r1) para el presidente...");
+            }
+
+            KeyPair parLlaves = registroECDSA.generarParLlavesECDSA();
+            this.llavePublicaPresidente = parLlaves.getPublic();
+            this.llavePrivadaPresidente = parLlaves.getPrivate();
+
+            registroECDSA.guardarLlavePublica(this.llavePublicaPresidente, pathPub);
+            registroECDSA.guardarLlavePrivada(this.llavePrivadaPresidente, pathPriv);
+
+            System.out.println("[PRESIDENTE] Llaves del presidente generadas y guardadas exitosamente:");
+            System.out.println("             -> Llave pública: " + pathPub);
+            System.out.println("             -> Llave privada: " + pathPriv);
+
+        } catch (Exception e) {
+            System.out.println("[!] Error al gestionar las llaves del presidente: " + e.getMessage());
+        }
+    }
+
+    public PublicKey getLlavePublicaPresidente() {
+        return llavePublicaPresidente;
+    }
+
+    public PrivateKey getLlavePrivadaPresidente() {
+        return llavePrivadaPresidente;
+    }
+
+    // =========================================================
+    // INICIALIZACIÓN DE LLAVES EC DEL JUEZ
+    // =========================================================
+
+    /**
+     * Inicializa las llaves EC públicas y privadas del juez que acaba de ingresar.
+     * Se guardan en la carpeta "claves_usuario/jueces/<nombreUsuario>".
+     * Si ya existen en dicha carpeta, se cargan sin volver a generarlas.
+     * Si no existen, se genera un nuevo par de llaves EC (secp256r1) y se guardan
+     * como
+     * "pub_<nombreUsuario>.txt" y "priv_<nombreUsuario>.txt".
+     */
+    public void inicializarLlavesJuez(Usuario juez) {
+        if (juez != null) {
+            inicializarLlavesJuez(juez.getNombreUsuario());
+        }
+    }
+
+    public void inicializarLlavesJuez(String nombreUsuario) {
+        Path dirClaves = Paths.get("claves_usuario", "jueces", nombreUsuario);
+        Path pathPub = dirClaves.resolve("pub_" + nombreUsuario + ".txt");
+        Path pathPriv = dirClaves.resolve("priv_" + nombreUsuario + ".txt");
+
+        // Soporte por si ya existían con o sin extensión .txt
+        if (!Files.exists(pathPub) && Files.exists(dirClaves.resolve("pub_" + nombreUsuario))) {
+            pathPub = dirClaves.resolve("pub_" + nombreUsuario);
+        }
+        if (!Files.exists(pathPriv) && Files.exists(dirClaves.resolve("priv_" + nombreUsuario))) {
+            pathPriv = dirClaves.resolve("priv_" + nombreUsuario);
+        }
+
+        if (!(motorRegistro instanceof RegistroECDSAPort registroECDSA)) {
+            System.out.println(
+                    "[!] El motor de registro ECDSA no está disponible para gestionar las llaves del juez.");
+            return;
+        }
+
+        try {
+            if (Files.exists(pathPub) && Files.exists(pathPriv)) {
+                try {
+                    this.llavePublicaJuez = registroECDSA.cargarLlavePublica(pathPub);
+                    this.llavePrivadaJuez = registroECDSA.cargarLlavePrivada(pathPriv);
+                    System.out.println("\n[JUEZ: " + nombreUsuario + "] Llaves criptográficas EC detectadas en '"
+                            + dirClaves + "'.");
+                    System.out.println("                   -> Llave pública cargada: " + pathPub);
+                    System.out.println("                   -> Llave privada cargada: " + pathPriv);
+                    return;
+                } catch (Exception ex) {
+                    System.out.println("\n[JUEZ: " + nombreUsuario + "] Las llaves en '" + dirClaves
+                            + "' no son de tipo EC válidas o están dañadas: " + ex.getMessage());
+                    System.out.println("[JUEZ: " + nombreUsuario + "] Regenerando llaves EC para el juez...");
+                }
+            } else {
+                System.out.println("\n[JUEZ: " + nombreUsuario + "] No se encontraron llaves previas del juez.");
+                System.out.println("[JUEZ: " + nombreUsuario + "] Generando nuevo par de llaves EC (secp256r1) para "
+                        + nombreUsuario + "...");
+            }
+
+            KeyPair parLlaves = registroECDSA.generarParLlavesECDSA();
+            this.llavePublicaJuez = parLlaves.getPublic();
+            this.llavePrivadaJuez = parLlaves.getPrivate();
+
+            registroECDSA.guardarLlavePublica(this.llavePublicaJuez, pathPub);
+            registroECDSA.guardarLlavePrivada(this.llavePrivadaJuez, pathPriv);
+
+            System.out.println("[JUEZ: " + nombreUsuario + "] Llaves del juez generadas y guardadas exitosamente:");
+            System.out.println("                   -> Llave pública: " + pathPub);
+            System.out.println("                   -> Llave privada: " + pathPriv);
+
+        } catch (Exception e) {
+            System.out.println("[!] Error al gestionar las llaves del juez (" + nombreUsuario + "): " + e.getMessage());
+        }
+    }
+
+    public PublicKey getLlavePublicaJuez() {
+        return llavePublicaJuez;
+    }
+
+    public PrivateKey getLlavePrivadaJuez() {
+        return llavePrivadaJuez;
+    }
+
+    // =========================================================
+    // INICIALIZACIÓN DE LLAVES EC DEL PINTOR
+    // =========================================================
+
+    /**
+     * Inicializa las llaves EC públicas y privadas del pintor que acaba de
+     * ingresar.
+     * Se guardan en la carpeta "claves_usuario/pintores/<nombreUsuario>".
+     * Si dicha carpeta no existe, se crea automáticamente.
+     * Si ya existen las llaves en dicha carpeta, se cargan sin volver a generarlas.
+     * Si no existen, se genera un nuevo par de llaves EC (secp256r1) y se guardan
+     * como
+     * "pub_<nombreUsuario>.txt" y "priv_<nombreUsuario>.txt".
+     */
+    public void inicializarLlavesPintor(Usuario pintor) {
+        if (pintor != null) {
+            inicializarLlavesPintor(pintor.getNombreUsuario());
+        }
+    }
+
+    public void inicializarLlavesPintor(String nombreUsuario) {
+        Path dirClaves = Paths.get("claves_usuario", "pintores", nombreUsuario);
+        Path pathPub = dirClaves.resolve("pub_" + nombreUsuario + ".txt");
+        Path pathPriv = dirClaves.resolve("priv_" + nombreUsuario + ".txt");
+
+        // Soporte por si ya existían con o sin extensión .txt
+        if (!Files.exists(pathPub) && Files.exists(dirClaves.resolve("pub_" + nombreUsuario))) {
+            pathPub = dirClaves.resolve("pub_" + nombreUsuario);
+        }
+        if (!Files.exists(pathPriv) && Files.exists(dirClaves.resolve("priv_" + nombreUsuario))) {
+            pathPriv = dirClaves.resolve("priv_" + nombreUsuario);
+        }
+
+        if (!(motorRegistro instanceof RegistroECDSAPort registroECDSA)) {
+            System.out.println(
+                    "[!] El motor de registro ECDSA no está disponible para gestionar las llaves del pintor.");
+            return;
+        }
+
+        try {
+            if (Files.exists(pathPub) && Files.exists(pathPriv)) {
+                try {
+                    this.llavePublicaPintor = registroECDSA.cargarLlavePublica(pathPub);
+                    this.llavePrivadaPintor = registroECDSA.cargarLlavePrivada(pathPriv);
+                    System.out.println("\n[PINTOR: " + nombreUsuario + "] Llaves criptográficas EC detectadas en '"
+                            + dirClaves + "'.");
+                    System.out.println("                     -> Llave pública cargada: " + pathPub);
+                    System.out.println("                     -> Llave privada cargada: " + pathPriv);
+                    return;
+                } catch (Exception ex) {
+                    System.out.println("\n[PINTOR: " + nombreUsuario + "] Las llaves en '" + dirClaves
+                            + "' no son de tipo EC válidas o están dañadas: " + ex.getMessage());
+                    System.out.println("[PINTOR: " + nombreUsuario + "] Regenerando llaves EC para el pintor...");
+                }
+            } else {
+                System.out.println("\n[PINTOR: " + nombreUsuario + "] No se encontraron llaves previas del pintor.");
+                System.out.println("[PINTOR: " + nombreUsuario + "] Generando nuevo par de llaves EC (secp256r1) para "
+                        + nombreUsuario + "...");
+            }
+
+            // Asegurar que la nueva carpeta exista
+            Files.createDirectories(dirClaves);
+
+            KeyPair parLlaves = registroECDSA.generarParLlavesECDSA();
+            this.llavePublicaPintor = parLlaves.getPublic();
+            this.llavePrivadaPintor = parLlaves.getPrivate();
+
+            registroECDSA.guardarLlavePublica(this.llavePublicaPintor, pathPub);
+            registroECDSA.guardarLlavePrivada(this.llavePrivadaPintor, pathPriv);
+
+            System.out.println("[PINTOR: " + nombreUsuario
+                    + "] Llaves del pintor generadas y guardadas exitosamente en '" + dirClaves + "':");
+            System.out.println("                     -> Llave pública: " + pathPub);
+            System.out.println("                     -> Llave privada: " + pathPriv);
+
+        } catch (Exception e) {
+            System.out
+                    .println("[!] Error al gestionar las llaves del pintor (" + nombreUsuario + "): " + e.getMessage());
+        }
+    }
+
+    public PublicKey getLlavePublicaPintor() {
+        return llavePublicaPintor;
+    }
+
+    public PrivateKey getLlavePrivadaPintor() {
+        return llavePrivadaPintor;
+    }
+
+    public SecretKey getClaveAESPintor() {
+        return claveAESPintor;
+    }
+
+    // =========================================================
+    // GENERACIÓN DE LLAVE SIMÉTRICA AES (ECDH CON SISTEMA)
+    // =========================================================
+
+    /**
+     * Permite al pintor ingresar la ruta de su llave privada (con ruta base
+     * sugerida claves_usuario/pintores/<NombreUsuario> o claves_usuario/pintor/<NombreUsuario>),
+     * multiplicarla por la llave pública EC del sistema (claves_sistema/pub_sist.txt)
+     * mediante ECDH y generar la llave simétrica AES resultante.
+     */
+    public SecretKey generarLlaveAESPintor(Usuario pintor) {
+        String nombreUsuario = pintor.getNombreUsuario();
+        Path dirBase = Paths.get("claves_usuario", "pintores", nombreUsuario);
+        if (!Files.exists(dirBase) && Files.exists(Paths.get("claves_usuario", "pintor", nombreUsuario))) {
+            dirBase = Paths.get("claves_usuario", "pintor", nombreUsuario);
+        }
+
+        String nombreArchivoDefecto = "priv_" + nombreUsuario + ".txt";
+        Path pathDefecto = dirBase.resolve(nombreArchivoDefecto);
+
+        System.out.println("\n==============================================================");
+        System.out.println(" GENERACIÓN DE LLAVE AES (ACUERDO DE CLAVES ECDH CON EL SISTEMA)");
+        System.out.println("==============================================================");
+        System.out.println("Pintor autenticado:   " + nombreUsuario);
+        System.out.println("Ruta base del pintor: " + dirBase);
+        System.out.print("Ingrese la ruta o archivo de su LLAVE PRIVADA (ENTER para '" + pathDefecto + "'): ");
+
+        String entrada = scanner.nextLine().trim();
+        Path pathPriv;
+        if (entrada.isEmpty()) {
+            pathPriv = pathDefecto;
+        } else {
+            Path p = Paths.get(entrada);
+            if (!Files.exists(p) && Files.exists(dirBase.resolve(entrada))) {
+                pathPriv = dirBase.resolve(entrada);
+            } else {
+                pathPriv = p;
+            }
+        }
+
+        return generarLlaveAESPintor(pintor, pathPriv);
+    }
+
+    public SecretKey generarLlaveAESPintor(Usuario pintor, Path pathPrivPintor) {
+        String nombreUsuario = pintor.getNombreUsuario();
+
+        if (!Files.exists(pathPrivPintor)) {
+            System.out.println("\n[!] No se encontró el archivo de la llave privada del pintor en: " + pathPrivPintor);
+            return null;
+        }
+
+        if (!(motorRegistro instanceof RegistroECDSAPort registroECDSA)) {
+            System.out.println("[!] El motor de registro ECDSA no está disponible para cargar llaves.");
+            return null;
+        }
+
+        if (!(motorConfidencialidad instanceof ConfidencialidadAESPort moduloAES)) {
+            System.out.println("[!] El módulo de confidencialidad AES no está disponible para derivar la clave.");
+            return null;
+        }
+
+        try {
+            // 1. Cargar llave privada del pintor
+            PrivateKey privPintor = registroECDSA.cargarLlavePrivada(pathPrivPintor);
+
+            // 2. Cargar llave pública del sistema desde claves_sistema/pub_sist.txt
+            Path pathPubSistema = Paths.get("claves_sistema", "pub_sist.txt");
+            if (!Files.exists(pathPubSistema)) {
+                System.out.println("[!] No se encontró la llave pública del sistema en: " + pathPubSistema);
+                return null;
+            }
+            PublicKey pubSistema = registroECDSA.cargarLlavePublica(pathPubSistema);
+
+            // 3. Multiplicar la llave privada del pintor por la pública del sistema mediante ECDH
+            SecretKey claveAES = moduloAES.derivarClaveAES(privPintor, pubSistema);
+            this.claveAESPintor = claveAES;
+
+            // 4. Imprimir en consola la llave AES generada (Hexadecimal y Base64)
+            String claveBase64 = Base64.getEncoder().encodeToString(claveAES.getEncoded());
+            StringBuilder hexString = new StringBuilder();
+            for (byte b : claveAES.getEncoded()) {
+                hexString.append(String.format("%02X", b));
+            }
+
+            System.out.println("\n==============================================================");
+            System.out.println(" LLAVE SIMÉTRICA AES GENERADA EXITOSAMENTE (ECDH)");
+            System.out.println("==============================================================");
+            System.out.println("Pintor:                        " + nombreUsuario);
+            System.out.println("Algoritmo derivado:            " + claveAES.getAlgorithm() + " (" + (claveAES.getEncoded().length * 8) + " bits)");
+            System.out.println("Llave privada cargada (Pintor): " + pathPrivPintor);
+            System.out.println("Llave pública multiplicada:    " + pathPubSistema);
+            System.out.println("Operación Criptográfica:       d_pintor * Q_sistema -> Derivación SHA-256");
+            System.out.println("--------------------------------------------------------------");
+            System.out.println("LLAVE AES (Hexadecimal): " + hexString);
+            System.out.println("LLAVE AES (Base64):      " + claveBase64);
+            System.out.println("==============================================================\n");
+
+            return claveAES;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error al generar la llave AES compartida: " + e.getMessage());
+            return null;
+        }
+    }
+
+    // =========================================================
+    // CIFRADO DE IMAGEN CON AES-GCM
+    // =========================================================
+
+    /**
+     * Solicita al pintor la ruta de la imagen ubicada en "imagenes/",
+     * y la cifra utilizando el modo AES-GCM con la llave AES previamente calculada.
+     */
+    public byte[] cifrarImagenPintor(Usuario pintor, SecretKey claveAES) {
+        Path dirImagenes = Paths.get("imagenes");
+        try {
+            if (!Files.exists(dirImagenes)) {
+                Files.createDirectories(dirImagenes);
+            }
+        } catch (Exception ignored) {
+        }
+
+        String sugerenciaDefecto = "imagen.png";
+        Path pathSugerido = dirImagenes.resolve(sugerenciaDefecto);
+
+        System.out.println("==============================================================");
+        System.out.println(" CIFRADO AUTENTICADO DE IMAGEN / OBRA (AES-GCM)");
+        System.out.println("==============================================================");
+        System.out.println("Directorio base de imágenes: " + dirImagenes);
+        System.out.print("Ingrese la ruta o nombre de la imagen (ENTER para '" + pathSugerido + "'): ");
+
+        String entrada = scanner.nextLine().trim();
+        Path pathImagen;
+        if (entrada.isEmpty()) {
+            pathImagen = pathSugerido;
+        } else {
+            Path p = Paths.get(entrada);
+            if (!Files.exists(p) && Files.exists(dirImagenes.resolve(entrada))) {
+                pathImagen = dirImagenes.resolve(entrada);
+            } else {
+                pathImagen = p;
+            }
+        }
+
+        return cifrarImagenPintor(pintor, claveAES, pathImagen);
+    }
+
+    public byte[] cifrarImagenPintor(Usuario pintor, SecretKey claveAES, Path pathImagen) {
+        if (!Files.exists(pathImagen)) {
+            System.out.println("\n[!] No se encontró el archivo de la imagen en: " + pathImagen);
+            return null;
+        }
+
+        if (!(motorConfidencialidad instanceof ConfidencialidadAESPort moduloAES)) {
+            System.out.println("[!] El mÃ³dulo de confidencialidad AES no estÃ¡ disponible para cifrar.");
+            return null;
+        }
+
+        try {
+            // 1. Leer los bytes de la imagen original
+            byte[] bytesImagen = Files.readAllBytes(pathImagen);
+
+            // 2. Generar Vector de InicializaciÃ³n (IV) de 12 bytes (96 bits) para GCM
+            byte[] iv = moduloAES.generarIV(12);
+
+            // 3. Cifrar con AES-GCM (cifrado autenticado con tag de 128 bits)
+            byte[] datosCifrados = moduloAES.cifrarAES_GCM(bytesImagen, claveAES, iv);
+
+            // 4. Empaquetar IV + Datos Cifrados [IV (12 bytes) + CIFRADO + TAG (16 bytes)]
+            byte[] resultadoConIV = new byte[iv.length + datosCifrados.length];
+            System.arraycopy(iv, 0, resultadoConIV, 0, iv.length);
+            System.arraycopy(datosCifrados, 0, resultadoConIV, iv.length, datosCifrados.length);
+
+            this.ultimaImagenCifrada = resultadoConIV;
+            this.ultimoIV = iv;
+
+            // 5. Guardar la imagen cifrada en la carpeta imagenes/ con extensiÃ³n .enc
+            String nombreSalida = pathImagen.getFileName().toString() + ".enc";
+            Path pathSalida = pathImagen.getParent() != null
+                    ? pathImagen.getParent().resolve(nombreSalida)
+                    : Paths.get("imagenes", nombreSalida);
+
+            Files.write(pathSalida, resultadoConIV);
+            this.ultimaRutaImagenCifrada = pathSalida;
+
+            // 6. Imprimir informaciÃ³n de la imagen cifrada
+            String ivHex = bytesToHex(iv);
+            String ivBase64 = Base64.getEncoder().encodeToString(iv);
+            String muestraCifradaBase64 = Base64.getEncoder().encodeToString(datosCifrados);
+            if (muestraCifradaBase64.length() > 64) {
+                muestraCifradaBase64 = muestraCifradaBase64.substring(0, 64) + "...";
+            }
+
+            // Descifrado de prueba para verificar integridad y tag de autenticaciÃ³n
+            byte[] descifradoVerif = moduloAES.descifrarAES_GCM(datosCifrados, claveAES, iv);
+            boolean verificacionValida = java.util.Arrays.equals(bytesImagen, descifradoVerif);
+
+            System.out.println("\n==============================================================");
+            System.out.println(" IMAGEN CIFRADA CON ÉXITO (AES-GCM - INTEGRANTE 1)");
+            System.out.println("==============================================================");
+            System.out.println("Pintor emisor:               " + pintor.getNombreUsuario());
+            System.out.println("Archivo de imagen original:  " + pathImagen);
+            System.out.println("Tamaño imagen original:      " + bytesImagen.length + " bytes");
+            System.out.println("Algoritmo de cifrado:        AES/GCM/NoPadding");
+            System.out.println("IV generado (12 bytes):      " + ivHex + " (Base64: " + ivBase64 + ")");
+            System.out.println("Tag de autenticación:        128 bits");
+            System.out.println("Tamaño de payload cifrado:   " + datosCifrados.length + " bytes");
+            System.out.println("Muestra cifrada (Base64):    " + muestraCifradaBase64);
+            System.out.println("Archivo cifrado exportado:   " + pathSalida + " (total: " + resultadoConIV.length + " bytes)");
+            System.out.println("VerificaciÃ³n de Integridad:  " + (verificacionValida ? "VÃLIDA [OK]" : "INVÃLIDA [ERROR]"));
+            System.out.println("==============================================================\n");
+
+            return resultadoConIV;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error durante el cifrado AES-GCM de la imagen: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02X", b));
+        }
+        return sb.toString();
+    }
+
+    public byte[] getUltimaImagenCifrada() {
+        return ultimaImagenCifrada;
+    }
+
+    public byte[] getUltimoIV() {
+        return ultimoIV;
+    }
+
+    public Path getUltimaRutaImagenCifrada() {
+        return ultimaRutaImagenCifrada;
+    }
+
+    // =========================================================
+    // CIFRADO DE IMAGEN CON AES-GCM
+    // =========================================================
+
+    /**
+     * Solicita al pintor la ruta de la imagen ubicada en "imagenes/",
+     * y la cifra utilizando el modo AES-GCM con la llave AES previamente calculada.
+     */
+    public byte[] cifrarImagenPintor(Usuario pintor, SecretKey claveAES) {
+        Path dirImagenes = Paths.get("imagenes");
+        try {
+            if (!Files.exists(dirImagenes)) {
+                Files.createDirectories(dirImagenes);
+            }
+        } catch (Exception ignored) {
+        }
+
+        String sugerenciaDefecto = "imagen.png";
+        Path pathSugerido = dirImagenes.resolve(sugerenciaDefecto);
+
+        System.out.println("==============================================================");
+        System.out.println(" CIFRADO AUTENTICADO DE IMAGEN / OBRA (AES-GCM)");
+        System.out.println("==============================================================");
+        System.out.println("Directorio base de imágenes: " + dirImagenes);
+        System.out.print("Ingrese la ruta o nombre de la imagen (ENTER para '" + pathSugerido + "'): ");
+
+        String entrada = scanner.nextLine().trim();
+        Path pathImagen;
+        if (entrada.isEmpty()) {
+            pathImagen = pathSugerido;
+        } else {
+            Path p = Paths.get(entrada);
+            if (!Files.exists(p) && Files.exists(dirImagenes.resolve(entrada))) {
+                pathImagen = dirImagenes.resolve(entrada);
+            } else {
+                pathImagen = p;
+            }
+        }
+
+        return cifrarImagenPintor(pintor, claveAES, pathImagen);
+    }
+
+    public byte[] cifrarImagenPintor(Usuario pintor, SecretKey claveAES, Path pathImagen) {
+        if (!Files.exists(pathImagen)) {
+            System.out.println("\n[!] No se encontró el archivo de la imagen en: " + pathImagen);
+            return null;
+        }
+
+        if (!(motorConfidencialidad instanceof ConfidencialidadAESPort moduloAES)) {
+            System.out.println("[!] El mÃ³dulo de confidencialidad AES no estÃ¡ disponible para cifrar.");
+            return null;
+        }
+
+        try {
+            // 1. Leer los bytes de la imagen original
+            byte[] bytesImagen = Files.readAllBytes(pathImagen);
+
+            // 2. Generar Vector de InicializaciÃ³n (IV) de 12 bytes (96 bits) para GCM
+            byte[] iv = moduloAES.generarIV(12);
+
+            // 3. Cifrar con AES-GCM (cifrado autenticado con tag de 128 bits)
+            byte[] datosCifrados = moduloAES.cifrarAES_GCM(bytesImagen, claveAES, iv);
+
+            // 4. Empaquetar IV + Datos Cifrados [IV (12 bytes) + CIFRADO + TAG (16 bytes)]
+            byte[] resultadoConIV = new byte[iv.length + datosCifrados.length];
+            System.arraycopy(iv, 0, resultadoConIV, 0, iv.length);
+            System.arraycopy(datosCifrados, 0, resultadoConIV, iv.length, datosCifrados.length);
+
+            this.ultimaImagenCifrada = resultadoConIV;
+            this.ultimoIV = iv;
+
+            // 5. Guardar la imagen cifrada en la carpeta imagenes/ con extensiÃ³n .enc
+            String nombreSalida = pathImagen.getFileName().toString() + ".enc";
+            Path pathSalida = pathImagen.getParent() != null
+                    ? pathImagen.getParent().resolve(nombreSalida)
+                    : Paths.get("imagenes", nombreSalida);
+
+            Files.write(pathSalida, resultadoConIV);
+            this.ultimaRutaImagenCifrada = pathSalida;
+
+            // 6. Imprimir informaciÃ³n de la imagen cifrada
+            String ivHex = bytesToHex(iv);
+            String ivBase64 = Base64.getEncoder().encodeToString(iv);
+            String muestraCifradaBase64 = Base64.getEncoder().encodeToString(datosCifrados);
+            if (muestraCifradaBase64.length() > 64) {
+                muestraCifradaBase64 = muestraCifradaBase64.substring(0, 64) + "...";
+            }
+
+            // Descifrado de prueba para verificar integridad y tag de autenticaciÃ³n
+            byte[] descifradoVerif = moduloAES.descifrarAES_GCM(datosCifrados, claveAES, iv);
+            boolean verificacionValida = java.util.Arrays.equals(bytesImagen, descifradoVerif);
+
+            System.out.println("\n==============================================================");
+            System.out.println(" IMAGEN CIFRADA CON ÉXITO (AES-GCM - INTEGRANTE 1)");
+            System.out.println("==============================================================");
+            System.out.println("Pintor emisor:               " + pintor.getNombreUsuario());
+            System.out.println("Archivo de imagen original:  " + pathImagen);
+            System.out.println("Tamaño imagen original:      " + bytesImagen.length + " bytes");
+            System.out.println("Algoritmo de cifrado:        AES/GCM/NoPadding");
+            System.out.println("IV generado (12 bytes):      " + ivHex + " (Base64: " + ivBase64 + ")");
+            System.out.println("Tag de autenticación:        128 bits");
+            System.out.println("Tamaño de payload cifrado:   " + datosCifrados.length + " bytes");
+            System.out.println("Muestra cifrada (Base64):    " + muestraCifradaBase64);
+            System.out.println("Archivo cifrado exportado:   " + pathSalida + " (total: " + resultadoConIV.length + " bytes)");
+            System.out.println("VerificaciÃ³n de Integridad:  " + (verificacionValida ? "VÃLIDA âœ“" : "INVÃLIDA âœ—"));
+            System.out.println("==============================================================\n");
+
+            return resultadoConIV;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error durante el cifrado AES-GCM de la imagen: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02X", b));
+        }
+        return sb.toString();
+    }
+
+    public byte[] getUltimaImagenCifrada() {
+        return ultimaImagenCifrada;
+    }
+
+    public byte[] getUltimoIV() {
+        return ultimoIV;
+    }
+
+    public Path getUltimaRutaImagenCifrada() {
+        return ultimaRutaImagenCifrada;
+    }
+
+    // =========================================================
+    // INICIO DE SESIÓN SIMULADO Y ASIGNACIÓN DE ROL
+    // =========================================================
+
+    private void iniciarSesion() {
+
+        System.out.println("\n--- Simulación de LogIn ---");
+        System.out.print("Ingrese su nombre de usuario: ");
         String nombre = scanner.nextLine().trim();
 
         if (nombre.isEmpty()) {
-            nombre = "PintorAnonimo";
+            System.out.println("[!] El nombre de usuario no puede estar vacío.");
+            return;
         }
 
+        System.out.print("Ingrese su contraseña: ");
+        String contrasena = scanner.nextLine().trim();
+
+        // 1. Verificar si el usuario está en el arreglo de JUEZ
+        for (String[] juez : USUARIOS_JUEZ) {
+            if (juez[0].equalsIgnoreCase(nombre)) {
+                if (juez[1].equals(contrasena)) {
+                    Usuario usuarioJuez = new Usuario(
+                            UUID.randomUUID().toString(),
+                            juez[0],
+                            RolUsuario.JUEZ);
+
+                    System.out.println("\n>> [AUTORIDAD DETECTADA] Acceso concedido como JUEZ.");
+                    System.out.println(">> Sesión iniciada con éxito como: "
+                            + usuarioJuez.getNombreUsuario()
+                            + " (Rol: " + usuarioJuez.getRol() + ")");
+
+                    menuJuez(usuarioJuez);
+                } else {
+                    System.out.println("\n[!] Contraseña incorrecta para el usuario JUEZ: " + nombre);
+                }
+                return;
+            }
+        }
+
+        // 2. Verificar si el usuario está en el arreglo de PRESIDENTE
+        for (String[] presi : USUARIOS_PRESIDENTE) {
+            if (presi[0].equalsIgnoreCase(nombre)) {
+                if (presi[1].equals(contrasena)) {
+                    Usuario usuarioPresidente = new Usuario(
+                            UUID.randomUUID().toString(),
+                            presi[0],
+                            RolUsuario.PRESIDENTE);
+
+                    System.out.println("\n>> [AUTORIDAD DETECTADA] Acceso concedido como PRESIDENTE.");
+                    System.out.println(">> Sesión iniciada con éxito como: "
+                            + usuarioPresidente.getNombreUsuario()
+                            + " (Rol: " + usuarioPresidente.getRol() + ")");
+
+                    menuPresidente(usuarioPresidente);
+                } else {
+                    System.out.println("\n[!] Contraseña incorrecta para el usuario PRESIDENTE: " + nombre);
+                }
+                return;
+            }
+        }
+
+        // 3. Si no está en ninguno de los arreglos se considerará que es un pintor
         Usuario pintor = new Usuario(
                 UUID.randomUUID().toString(),
                 nombre,
                 RolUsuario.PINTOR);
 
-        System.out.println(
-                ">> Sesión iniciada con éxito como: "
-                        + pintor.getNombreUsuario()
-                        + " (Rol: " + pintor.getRol() + ")");
+        System.out.println("\n>> Usuario no encontrado en los registros de JUEZ ni PRESIDENTE.");
+        System.out.println(">> Se le ha asignado automáticamente el rol: PINTOR");
+        System.out.println(">> Sesión iniciada con éxito como: "
+                + pintor.getNombreUsuario()
+                + " (Rol: " + pintor.getRol() + ")");
 
         menuPintor(pintor);
-    }
-
-    private void loginJuez() {
-
-        System.out.print("\nIngrese su nombre de Juez/Calificador: ");
-        String nombre = scanner.nextLine().trim();
-
-        if (nombre.isEmpty()) {
-            nombre = "JuezOficial";
-        }
-
-        Usuario juez = new Usuario(
-                UUID.randomUUID().toString(),
-                nombre,
-                RolUsuario.JUEZ);
-
-        System.out.println(
-                ">> Sesión iniciada con éxito como: "
-                        + juez.getNombreUsuario()
-                        + " (Rol: " + juez.getRol() + ")");
-
-        menuJuez(juez);
-    }
-
-    private void loginPresidente() {
-
-        System.out.print("\nIngrese su nombre de Presidente: ");
-        String nombre = scanner.nextLine().trim();
-
-        if (nombre.isEmpty()) {
-            nombre = "Presidente";
-        }
-
-        Usuario presidente = new Usuario(
-                UUID.randomUUID().toString(),
-                nombre,
-                RolUsuario.PRESIDENTE);
-
-        System.out.println(
-                ">> Sesión iniciada con éxito como: "
-                        + presidente.getNombreUsuario()
-                        + " (Rol: " + presidente.getRol() + ")");
-
-        menuPresidente(presidente);
     }
 
     // =========================================================
@@ -166,6 +881,9 @@ public class MenuPrincipalConsola {
     // =========================================================
 
     private void menuPintor(Usuario pintor) {
+
+        // Inicializar llaves EC del pintor que acaba de ingresar
+        inicializarLlavesPintor(pintor);
 
         boolean regresar = false;
 
@@ -175,9 +893,10 @@ public class MenuPrincipalConsola {
                     "\n--- Panel del Pintor ("
                             + pintor.getNombreUsuario() + ") ---");
 
-            System.out.println("1. Registrar y proteger obra (ECDSA + AES + Blind RSA)");
-            System.out.println("2. Consultar mis obras registradas");
-            System.out.println("3. Regresar al menú de inicio");
+            System.out.println("1. Registrar y proteger obra (Generar llave AES con el Sistema - ECDH)");
+            System.out.println("2. Demostración de autenticidad ECDSA de obra");
+            System.out.println("3. Consultar mis obras registradas");
+            System.out.println("4. Regresar al menú de inicio");
             System.out.print("Seleccione una opción: ");
 
             String op = scanner.nextLine().trim();
@@ -185,16 +904,23 @@ public class MenuPrincipalConsola {
             switch (op) {
 
                 case "1":
-                    // NUEVO: Ejecutar prueba real del modulo ECDSA.
-                    demostrarRegistroECDSA(pintor);
+                    // Generar llave simétrica AES compartida con el sistema mediante ECDH
+                    SecretKey claveAES = generarLlaveAESPintor(pintor);
+                    if (claveAES != null) {
+                        cifrarImagenPintor(pintor, claveAES);
+                    }
                     break;
 
                 case "2":
+                    demostrarRegistroECDSA(pintor);
+                    break;
+
+                case "3":
                     System.out.println(
                             "\n[Simulación]: No hay obras registradas en memoria en este momento.");
                     break;
 
-                case "3":
+                case "4":
                     regresar = true;
                     break;
 
@@ -266,7 +992,13 @@ public class MenuPrincipalConsola {
         try {
 
             // 2. Generar par de llaves ECDSA.
-            KeyPair llaves = registroECDSA.generarParLlavesECDSA();
+            // Usar llaves EC del pintor cargadas de claves_usuario/pintores
+            KeyPair llaves;
+            if (this.llavePrivadaPintor != null && this.llavePublicaPintor != null) {
+                llaves = new KeyPair(this.llavePublicaPintor, this.llavePrivadaPintor);
+            } else {
+                llaves = registroECDSA.generarParLlavesECDSA();
+            }
 
             // 3. Firmar con la llave privada.
             byte[] firma = registroECDSA.firmar(
@@ -340,6 +1072,9 @@ public class MenuPrincipalConsola {
 
     private void menuJuez(Usuario juez) {
 
+        // Inicializar llaves EC del juez que acaba de ingresar
+        inicializarLlavesJuez(juez);
+
         boolean regresar = false;
 
         while (!regresar) {
@@ -362,12 +1097,12 @@ public class MenuPrincipalConsola {
                             "\n[Simulación]: Verificación con ModuloAnonimatoRSA...");
                     break;
 
-                case "2":
+                case "3":
                     System.out.println(
                             "\n[Simulación]: Asignación de puntaje a obra anónima...");
                     break;
 
-                case "3":
+                case "4":
                     regresar = true;
                     break;
 
@@ -382,6 +1117,9 @@ public class MenuPrincipalConsola {
     // =========================================================
 
     private void menuPresidente(Usuario presidente) {
+
+        // Inicializar llaves EC del presidente (cargar existentes o generar nuevas)
+        inicializarLlavesPresidente();
 
         boolean regresar = false;
 

@@ -14,15 +14,19 @@ import javax.crypto.KeyAgreement;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+
+import com.paintingcompetition.domain.ports.out.ConfidencialidadAESPort;
 
 import com.paintingcompetition.domain.ports.out.MotorCriptograficoPort;
 
 /**
  * Adaptador de Salida para Confidencialidad y Acuerdo de Claves.
  * Asignado a: INTEGRANTE 1.
- * Responsabilidad: Cifrado autenticado con AES-GCM y derivación de secretos compartidos con ECDH.
+ * Responsabilidad: Cifrado autenticado con AES-GCM y derivación de secretos
+ * compartidos con ECDH.
  */
-public class ModuloConfidencialidadAES implements MotorCriptograficoPort {
+public class ModuloConfidencialidadAES implements ConfidencialidadAESPort {
 
     private static final String ALGORITMO_AES = "AES";
     private static final String TRANSFORMACION_AES_GCM = "AES/GCM/NoPadding";
@@ -38,7 +42,8 @@ public class ModuloConfidencialidadAES implements MotorCriptograficoPort {
     public byte[] cifrar(byte[] datos, Object clave) {
         try {
             if (!(clave instanceof SecretKey)) {
-                throw new IllegalArgumentException("La clave provista para el cifrado debe ser una instancia de SecretKey (AES)");
+                throw new IllegalArgumentException(
+                        "La clave provista para el cifrado debe ser una instancia de SecretKey (AES)");
             }
             SecretKey claveSecreta = (SecretKey) clave;
 
@@ -48,7 +53,8 @@ public class ModuloConfidencialidadAES implements MotorCriptograficoPort {
             // Ciframos los datos
             byte[] datosCifrados = cifrarAES_GCM(datos, claveSecreta, iv);
 
-            // Concatenamos el IV al inicio del payload cifrado [IV (12 bytes) + DATOS CIFRADOS]
+            // Concatenamos el IV al inicio del payload cifrado [IV (12 bytes) + DATOS
+            // CIFRADOS]
             // Esto permite que quien descifre pueda recuperar el IV fácilmente
             byte[] resultadoConIV = new byte[iv.length + datosCifrados.length];
             System.arraycopy(iv, 0, resultadoConIV, 0, iv.length);
@@ -64,13 +70,15 @@ public class ModuloConfidencialidadAES implements MotorCriptograficoPort {
     @Override
     public byte[] firmar(byte[] datos, Object clavePrivada) {
         // Corresponde a Integrante 2 (ModuloRegistroECDSA)
-        throw new UnsupportedOperationException("La firma criptográfica ECDSA no es responsabilidad del Integrante 1 (ModuloConfidencialidadAES)");
+        throw new UnsupportedOperationException(
+                "La firma criptográfica ECDSA no es responsabilidad del Integrante 1 (ModuloConfidencialidadAES)");
     }
 
     @Override
     public byte[] cegar(byte[] datos, Object clavePublica) {
         // Corresponde a Integrante 3 (ModuloAnonimatoRSA)
-        throw new UnsupportedOperationException("El cegado RSA de votos no es responsabilidad del Integrante 1 (ModuloConfidencialidadAES)");
+        throw new UnsupportedOperationException(
+                "El cegado RSA de votos no es responsabilidad del Integrante 1 (ModuloConfidencialidadAES)");
     }
 
     // =========================================================================
@@ -91,7 +99,8 @@ public class ModuloConfidencialidadAES implements MotorCriptograficoPort {
     }
 
     /**
-     * Genera un Vector de Inicialización (IV) criptográficamente seguro (típicamente 12 bytes para GCM).
+     * Genera un Vector de Inicialización (IV) criptográficamente seguro
+     * (típicamente 12 bytes para GCM).
      */
     public byte[] generarIV(int longitudBytes) {
         byte[] iv = new byte[longitudBytes];
@@ -129,7 +138,8 @@ public class ModuloConfidencialidadAES implements MotorCriptograficoPort {
     }
 
     /**
-     * Genera un par de llaves (pública y privada) para el protocolo Elliptic Curve Diffie-Hellman (ECDH).
+     * Genera un par de llaves (pública y privada) para el protocolo Elliptic Curve
+     * Diffie-Hellman (ECDH).
      */
     public KeyPair generarParLlavesECDH() {
         try {
@@ -143,23 +153,44 @@ public class ModuloConfidencialidadAES implements MotorCriptograficoPort {
     }
 
     /**
-     * Deriva un secreto compartido utilizando la llave privada local y la llave pública remota mediante ECDH.
+     * Deriva un secreto compartido utilizando la llave privada local y la llave
+     * pública remota mediante ECDH.
      */
     public byte[] derivarClaveCompartidaECDH(PrivateKey clavePrivadaLocal, PublicKey clavePublicaRemota) {
         try {
-            KeyAgreement keyAgreement = KeyAgreement.getInstance(ALGORITMO_ECDH);
+            KeyAgreement keyAgreement;
+            if (java.security.Security.getProvider("BC") != null) {
+                try {
+                    keyAgreement = KeyAgreement.getInstance(ALGORITMO_ECDH, "BC");
+                } catch (Exception e) {
+                    keyAgreement = KeyAgreement.getInstance(ALGORITMO_ECDH);
+                }
+            } else {
+                keyAgreement = KeyAgreement.getInstance(ALGORITMO_ECDH);
+            }
             keyAgreement.init(clavePrivadaLocal);
             keyAgreement.doPhase(clavePublicaRemota, true);
 
             // Generar el secreto compartido en bytes brutos
             byte[] secretoCompartido = keyAgreement.generateSecret();
 
-            // Pasamos el secreto por SHA-256 (KDF simple) para derivar un bloque limpio de 256 bits (32 bytes)
+            // Pasamos el secreto por SHA-256 (KDF simple) para derivar un bloque limpio de
+            // 256 bits (32 bytes)
             MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
             return sha256.digest(secretoCompartido);
 
         } catch (Exception e) {
             throw new RuntimeException("Error al derivar el secreto compartido mediante ECDH", e);
         }
+    }
+
+    /**
+     * Deriva una clave simétrica SecretKey (AES-256) a partir del acuerdo de claves
+     * ECDH.
+     */
+    @Override
+    public SecretKey derivarClaveAES(PrivateKey clavePrivadaLocal, PublicKey clavePublicaRemota) {
+        byte[] bytesClave = derivarClaveCompartidaECDH(clavePrivadaLocal, clavePublicaRemota);
+        return new SecretKeySpec(bytesClave, ALGORITMO_AES);
     }
 }

@@ -1,7 +1,12 @@
 
 package com.paintingcompetition.infrastructure.adapters.out.crypto;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.GeneralSecurityException;
+import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.PrivateKey;
@@ -11,6 +16,9 @@ import java.security.SecureRandom;
 import java.security.Signature;
 import java.security.SignatureException;
 import java.security.spec.ECGenParameterSpec;
+import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.Base64;
 import java.util.Objects;
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
@@ -204,5 +212,57 @@ public class ModuloRegistroECDSA implements RegistroECDSAPort {
                     "Error al verificar la firma ECDSA.", e
             );
         }
+    }
+
+    // =========================================================
+    // PERSISTENCIA Y CARGA DE LLAVES EC (INTEGRANTE 2)
+    // =========================================================
+
+    @Override
+    public void guardarLlavePublica(PublicKey clavePublica, Path rutaArchivo) throws IOException {
+        Objects.requireNonNull(clavePublica, "La clave pública no puede ser nula.");
+        Objects.requireNonNull(rutaArchivo, "La ruta de archivo no puede ser nula.");
+
+        if (rutaArchivo.getParent() != null) {
+            Files.createDirectories(rutaArchivo.getParent());
+        }
+        String b64 = Base64.getEncoder().encodeToString(clavePublica.getEncoded());
+        Files.writeString(rutaArchivo, b64, StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public void guardarLlavePrivada(PrivateKey clavePrivada, Path rutaArchivo) throws IOException {
+        Objects.requireNonNull(clavePrivada, "La clave privada no puede ser nula.");
+        Objects.requireNonNull(rutaArchivo, "La ruta de archivo no puede ser nula.");
+
+        if (rutaArchivo.getParent() != null) {
+            Files.createDirectories(rutaArchivo.getParent());
+        }
+        String b64 = Base64.getEncoder().encodeToString(clavePrivada.getEncoded());
+        Files.writeString(rutaArchivo, b64, StandardCharsets.UTF_8);
+    }
+
+    @Override
+    public PublicKey cargarLlavePublica(Path rutaArchivo) throws Exception {
+        Objects.requireNonNull(rutaArchivo, "La ruta de archivo no puede ser nula.");
+        if (!Files.exists(rutaArchivo)) {
+            throw new IOException("El archivo de clave pública no existe: " + rutaArchivo);
+        }
+        String contenido = Files.readString(rutaArchivo, StandardCharsets.UTF_8).trim();
+        byte[] bytes = Base64.getDecoder().decode(contenido);
+        KeyFactory kf = KeyFactory.getInstance("EC", PROVEEDOR_BC);
+        return kf.generatePublic(new X509EncodedKeySpec(bytes));
+    }
+
+    @Override
+    public PrivateKey cargarLlavePrivada(Path rutaArchivo) throws Exception {
+        Objects.requireNonNull(rutaArchivo, "La ruta de archivo no puede ser nula.");
+        if (!Files.exists(rutaArchivo)) {
+            throw new IOException("El archivo de clave privada no existe: " + rutaArchivo);
+        }
+        String contenido = Files.readString(rutaArchivo, StandardCharsets.UTF_8).trim();
+        byte[] bytes = Base64.getDecoder().decode(contenido);
+        KeyFactory kf = KeyFactory.getInstance("EC", PROVEEDOR_BC);
+        return kf.generatePrivate(new PKCS8EncodedKeySpec(bytes));
     }
 }

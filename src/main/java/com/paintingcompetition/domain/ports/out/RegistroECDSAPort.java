@@ -1,6 +1,7 @@
 
 package com.paintingcompetition.domain.ports.out;
 
+import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.PrivateKey;
 import java.security.PublicKey;
@@ -26,4 +27,13 @@ public interface RegistroECDSAPort extends MotorCriptograficoPort {
             byte[] firma,
             PublicKey clavePublica
     );
+
+    // Persistencia y carga de llaves EC
+    void guardarLlavePublica(PublicKey clavePublica, Path rutaArchivo) throws Exception;
+
+    void guardarLlavePrivada(PrivateKey clavePrivada, Path rutaArchivo) throws Exception;
+
+    PublicKey cargarLlavePublica(Path rutaArchivo) throws Exception;
+
+    PrivateKey cargarLlavePrivada(Path rutaArchivo) throws Exception;
 }
