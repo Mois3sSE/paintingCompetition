@@ -65,9 +65,15 @@ public class MenuPrincipalConsola {
     private PublicKey llavePublicaPresidente;
     private PrivateKey llavePrivadaPresidente;
 
+    // Llaves RSA (3072 bits) del presidente para la firma ciega de Chaum
+    // (ModuloAnonimatoRSA)
+    private RSAPublicKey llavePublicaRSAPresidente;
+    private RSAPrivateKey llavePrivadaRSAPresidente;
+
     // Llaves criptográficas EC (secp256r1) del juez autenticado
     private PublicKey llavePublicaJuez;
     private PrivateKey llavePrivadaJuez;
+    private Usuario juezAutenticado;
 
     // Llaves criptográficas EC (secp256r1) del pintor autenticado
     private PublicKey llavePublicaPintor;
@@ -92,6 +98,20 @@ public class MenuPrincipalConsola {
 
     // Última imagen descifrada por el juez/sistema
     private Path ultimaRutaImagenDescifrada;
+
+    // Última acta de calificación y veredicto emitido por un juez
+    private Path ultimaRutaActaCalificacion;
+    private int ultimoVeredictoEstrellas;
+    private String ultimoVeredictoComentario;
+
+    // Cegado de voto/calificación con ModuloAnonimatoRSA
+    private byte[] ultimoVotoCegado;
+    private BigInteger ultimoFactorCegado;
+    private Path ultimaRutaVotoCegado;
+    private Map<String, BigInteger> factoresCegado = new LinkedHashMap<>();
+
+    // Última firma ciega emitida por el presidente sobre un voto
+    private Path ultimaRutaFirmaCegadaPresidente;
 
     public MenuPrincipalConsola(
             MotorCriptograficoPort motorConfidencialidad,
@@ -264,6 +284,92 @@ public class MenuPrincipalConsola {
 
     public PrivateKey getLlavePrivadaPresidente() {
         return llavePrivadaPresidente;
+    }
+
+    // =========================================================
+    // INICIALIZACIÓN DE LLAVES RSA (FIRMA CIEGA CHAUM) DEL PRESIDENTE
+    // =========================================================
+
+    /**
+     * Genera e inicializa las llaves RSA exclusivas para el presidente utilizando
+     * ModuloAnonimatoRSA.
+     * Solo el presidente genera estas llaves y se guardan en
+     * "claves_usuario/presidente"
+     * con los nombres "nombrePresidente_RSA_pub.txt" y
+     * "nombrePresidente_RSA_priv.txt".
+     *
+     * @param presidente Usuario presidente autenticado
+     * @return Par de llaves RSA del presidente
+     */
+    public KeyPair inicializarOGenerarLlavesRSAPresidente(Usuario presidente) {
+        String nombrePresidente = (presidente != null && presidente.getNombreUsuario() != null)
+                ? presidente.getNombreUsuario()
+                : "presidente";
+
+        if (!(motorAnonimato instanceof ModuloAnonimatoRSA moduloRSA)) {
+            System.out.println("[!] El módulo de anonimato RSA no está disponible para gestionar las llaves.");
+            return null;
+        }
+
+        Path dirPresidente = Paths.get("claves_usuario", "presidente");
+        Path pathPub = dirPresidente.resolve(nombrePresidente + "_RSA_pub.txt");
+        Path pathPriv = dirPresidente.resolve(nombrePresidente + "_RSA_priv.txt");
+
+        try {
+            Files.createDirectories(dirPresidente);
+
+            if (Files.exists(pathPub) && Files.exists(pathPriv)) {
+                try {
+                    this.llavePublicaRSAPresidente = moduloRSA.cargarLlavePublica(pathPub);
+                    this.llavePrivadaRSAPresidente = moduloRSA.cargarLlavePrivada(pathPriv);
+
+                    System.out.println("\n[PRESIDENTE] Llaves RSA (Firma Ciega de Chaum) detectadas en '"
+                            + dirPresidente + "':");
+                    System.out.println("             -> Llave pública cargada: " + pathPub);
+                    System.out.println("             -> Llave privada cargada: " + pathPriv);
+
+                    return new KeyPair(this.llavePublicaRSAPresidente, this.llavePrivadaRSAPresidente);
+                } catch (Exception ex) {
+                    System.out.println("\n[PRESIDENTE] Las llaves RSA existentes están dañadas: " + ex.getMessage());
+                    System.out.println("[PRESIDENTE] Regenerando llaves RSA para el presidente...");
+                }
+            } else {
+                System.out.println("\n[PRESIDENTE] No se encontraron llaves RSA previas para la firma ciega.");
+                System.out.println(
+                        "[PRESIDENTE] Generando nuevo par de llaves RSA (3072 bits) con ModuloAnonimatoRSA...");
+            }
+
+            KeyPair parRSA = moduloRSA.generarParLlavesRSA();
+            this.llavePublicaRSAPresidente = (RSAPublicKey) parRSA.getPublic();
+            this.llavePrivadaRSAPresidente = (RSAPrivateKey) parRSA.getPrivate();
+
+            moduloRSA.guardarParLlavesRSA(parRSA, pathPub, pathPriv);
+
+            System.out.println("==============================================================");
+            System.out.println(" LLAVES RSA GENERADAS PARA EL PRESIDENTE (FIRMA CIEGA CHAUM)");
+            System.out.println("==============================================================");
+            System.out.println("Presidente:                  " + nombrePresidente);
+            System.out.println("Algoritmo:                   RSA (3072 bits)");
+            System.out.println("Módulo Criptográfico:        ModuloAnonimatoRSA");
+            System.out.println("Directorio de guardado:      " + dirPresidente);
+            System.out.println("Llave pública guardada:      " + pathPub.getFileName() + " (" + pathPub + ")");
+            System.out.println("Llave privada guardada:      " + pathPriv.getFileName() + " (" + pathPriv + ")");
+            System.out.println("==============================================================\n");
+
+            return parRSA;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error al generar/guardar las llaves RSA del presidente: " + e.getMessage());
+            return null;
+        }
+    }
+
+    public RSAPublicKey getLlavePublicaRSAPresidente() {
+        return llavePublicaRSAPresidente;
+    }
+
+    public RSAPrivateKey getLlavePrivadaRSAPresidente() {
+        return llavePrivadaRSAPresidente;
     }
 
     // =========================================================
@@ -1093,6 +1199,7 @@ public class MenuPrincipalConsola {
     // =========================================================
 
     private void menuJuez(Usuario juez) {
+        this.juezAutenticado = juez;
 
         // Inicializar llaves EC del juez que acaba de ingresar
         inicializarLlavesJuez(juez);
@@ -1116,7 +1223,7 @@ public class MenuPrincipalConsola {
             switch (op) {
 
                 case "1":
-                    verImagenesJuez();
+                    verImagenesJuez(juez);
                     break;
 
                 case "2":
@@ -1125,8 +1232,7 @@ public class MenuPrincipalConsola {
                     break;
 
                 case "3":
-                    System.out.println(
-                            "\n[Simulación]: Asignación de puntaje a obra anónima...");
+                    verImagenesJuez(juez);
                     break;
 
                 case "4":
@@ -1268,6 +1374,13 @@ public class MenuPrincipalConsola {
      * automáticamente para realizar la verificación criptográfica.
      */
     public void verImagenesJuez() {
+        Usuario juez = (this.juezAutenticado != null) ? this.juezAutenticado
+                : new Usuario(UUID.randomUUID().toString(), "juez1", RolUsuario.JUEZ);
+        verImagenesJuez(juez);
+    }
+
+    public void verImagenesJuez(Usuario juez) {
+        this.juezAutenticado = juez;
         System.out.println("\n==============================================================");
         System.out.println(" CATÁLOGO DE IMÁGENES / OBRAS REGISTRADAS (PANEL DEL JUEZ)");
         System.out.println("==============================================================");
@@ -1321,7 +1434,14 @@ public class MenuPrincipalConsola {
             return;
         }
 
-        verificarFirmaObraPintor(obraElegida.getNombreObra(), obraElegida.getAutor());
+        boolean esValida = verificarFirmaObraPintor(obraElegida.getNombreObra(), obraElegida.getAutor());
+
+        // Si la firma es válida, después de recuperar la llave AES y descifrar la
+        // imagen,
+        // el juez emite su veredicto (estrellas 1 a 3 y comentarios)
+        if (esValida) {
+            solicitarVeredictoJuez(juez, obraElegida.getNombreObra(), obraElegida.getAutor());
+        }
     }
 
     /**
@@ -1624,10 +1744,610 @@ public class MenuPrincipalConsola {
         return ultimaRutaImagenDescifrada;
     }
 
+    // =========================================================
+    // VEREDICTO Y ACTA DE CALIFICACIÓN DEL JUEZ
+    // =========================================================
+
+    /**
+     * Extrae el nombre base de la obra limpiando extensiones y sufijos como
+     * _Cifrado o _descifrada.
+     * Ejemplo: "mona_lisa.bmp" -> "mona_lisa", "mona_lisa_descifrada_davinci.bmp"
+     * -> "mona_lisa".
+     *
+     * @param nombreObra Nombre o ruta de la obra
+     * @return Nombre base de la obra
+     */
+    public static String extraerNombreBaseObra(String nombreObra) {
+        if (nombreObra == null || nombreObra.isEmpty()) {
+            return "obra";
+        }
+        String s = Paths.get(nombreObra).getFileName().toString();
+        int punto = s.lastIndexOf('.');
+        if (punto > 0) {
+            s = s.substring(0, punto);
+        }
+        int idxDesc = s.toLowerCase().indexOf("_descifrad");
+        if (idxDesc > 0) {
+            s = s.substring(0, idxDesc);
+        }
+        int idxCif = s.toLowerCase().indexOf("_cifrad");
+        if (idxCif > 0) {
+            s = s.substring(0, idxCif);
+        }
+        return s;
+    }
+
+    /**
+     * Solicita interactivamente por consola el veredicto del juez (1 a 3 estrellas
+     * y comentario)
+     * y registra el acta correspondiente.
+     *
+     * @param juez       Usuario juez que realiza la evaluación
+     * @param nombreObra Nombre de la obra evaluada
+     * @param autor      Nombre del autor/pintor de la obra
+     * @return Path del archivo txt generado, o null si ocurre un error
+     */
+    public Path solicitarVeredictoJuez(Usuario juez, String nombreObra, String autor) {
+        String nombreJuez = (juez != null && juez.getNombreUsuario() != null)
+                ? juez.getNombreUsuario()
+                : (this.juezAutenticado != null ? this.juezAutenticado.getNombreUsuario() : "juez1");
+        String nombreBase = extraerNombreBaseObra(nombreObra);
+
+        System.out.println("==============================================================");
+        System.out.println(" EMISIÓN DE VEREDICTO DEL JUEZ SOBRE LA OBRA");
+        System.out.println("==============================================================");
+        System.out.println("Juez evaluador:        " + nombreJuez);
+        System.out.println("Obra evaluada:         " + nombreBase);
+        System.out.println("Autor / Pintor:        " + autor);
+        System.out.println("--------------------------------------------------------------");
+
+        int estrellas = 0;
+        while (estrellas < 1 || estrellas > 3) {
+            System.out.print("Ingrese calificación en estrellas (1 a 3): ");
+            String entrada = scanner.nextLine().trim();
+            try {
+                int val = Integer.parseInt(entrada);
+                if (val >= 1 && val <= 3) {
+                    estrellas = val;
+                } else {
+                    System.out.println("[!] Debe ingresar un valor entre 1 y 3 estrellas.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("[!] Entrada inválida. Ingrese un número entero (1, 2 o 3).");
+            }
+        }
+
+        System.out.print("Ingrese un comentario sobre la obra: ");
+        String comentario = scanner.nextLine().trim();
+        if (comentario.isEmpty()) {
+            comentario = "Sin comentarios adicionales.";
+        }
+
+        Path pathActa = registrarVeredictoJuez(nombreJuez, nombreObra, autor, estrellas, comentario);
+        if (pathActa != null) {
+            // Antes de enviarlo al presidente para que este lo firme, el juez ciega su
+            // calificación
+            cegarCalificacionJuez(nombreJuez, autor);
+        }
+        return pathActa;
+    }
+
+    /**
+     * Guarda el veredicto del juez en
+     * "calificaciones_jueces/nombreJuez_acta_nombreBase_autor.txt".
+     *
+     * @param nombreJuez Nombre del juez que emite la calificación
+     * @param nombreObra Nombre o ruta de la obra evaluada
+     * @param autor      Nombre del autor/pintor de la obra
+     * @param estrellas  Calificación en estrellas (1 a 3)
+     * @param comentario Comentario de la obra proporcionado por el juez
+     * @return Path del archivo txt generado en calificaciones_jueces/
+     */
+    public Path registrarVeredictoJuez(String nombreJuez, String nombreObra, String autor, int estrellas,
+            String comentario) {
+        if (estrellas < 1 || estrellas > 3) {
+            throw new IllegalArgumentException("La calificación en estrellas debe ser un valor de 1 a 3.");
+        }
+
+        String nombreBase = extraerNombreBaseObra(nombreObra);
+        String nombreArchivo = nombreJuez + "_acta_" + nombreBase + "_" + autor + ".txt";
+
+        Path dirCalificaciones = Paths.get("calificaciones_jueces");
+        try {
+            Files.createDirectories(dirCalificaciones);
+            Path pathActa = dirCalificaciones.resolve(nombreArchivo);
+
+            String contenido = "====================================================\n"
+                    + " ACTA DE CALIFICACIÓN DE OBRA - CONCURSO DE PINTURA\n"
+                    + "====================================================\n"
+                    + "Juez Evaluador:       " + nombreJuez + "\n"
+                    + "Obra Evaluada:        " + nombreBase + "\n"
+                    + "Autor / Pintor:       " + autor + "\n"
+                    + "Estrellas:            " + estrellas + "\n"
+                    + "Comentario de la obra:\n"
+                    + comentario + "\n"
+                    + "====================================================\n";
+
+            Files.writeString(pathActa, contenido, StandardCharsets.UTF_8);
+
+            this.ultimaRutaActaCalificacion = pathActa;
+            this.ultimoVeredictoEstrellas = estrellas;
+            this.ultimoVeredictoComentario = comentario;
+
+            System.out.println("==============================================================");
+            System.out.println(" ACTA DE CALIFICACIÓN REGISTRADA CON ÉXITO");
+            System.out.println("==============================================================");
+            System.out.println("Juez evaluador:        " + nombreJuez);
+            System.out.println("Obra evaluada:         " + nombreBase);
+            System.out.println("Autor / Pintor:        " + autor);
+            System.out.println("Estrellas:             " + estrellas);
+            System.out.println("Comentarios:           " + comentario);
+            System.out.println("Archivo guardado en:   " + pathActa);
+            System.out.println("==============================================================\n");
+
+            return pathActa;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error al guardar el acta de calificación: " + e.getMessage());
+            return null;
+        }
+    }
+
+    public Path getUltimaRutaActaCalificacion() {
+        return ultimaRutaActaCalificacion;
+    }
+
+    public int getUltimoVeredictoEstrellas() {
+        return ultimoVeredictoEstrellas;
+    }
+
+    public String getUltimoVeredictoComentario() {
+        return ultimoVeredictoComentario;
+    }
+
+    public Usuario getJuezAutenticado() {
+        return juezAutenticado;
+    }
+
+    public void setJuezAutenticado(Usuario juez) {
+        this.juezAutenticado = juez;
+    }
+
+    // =========================================================
+    // CEGADO DE CALIFICACIÓN / VOTO (FIRMA CIEGA DE CHAUM)
+    // =========================================================
+
+    /**
+     * Realiza el cegado de la calificación del juez utilizando la llave pública RSA
+     * del presidente
+     * localizada en "claves_usuario/presidente/presidente_RSA_pub.txt" y el método
+     * cegar() de ModuloAnonimatoRSA.
+     * Guarda el archivo cegado en "calificaciones_juces" (y
+     * "calificaciones_jueces") con el nombre
+     * "nombrejuez_cegado_autorDeObra" (.txt).
+     *
+     * @param nombreJuez Nombre del juez que realizó la votación
+     * @param autorObra  Nombre del autor de la obra que se está firmando
+     * @return Path del archivo cegado guardado en calificaciones_juces/
+     */
+    public Path cegarCalificacionJuez(String nombreJuez, String autorObra) {
+        return cegarCalificacionJuez(nombreJuez, autorObra, null);
+    }
+
+    /**
+     * Realiza el cegado de los datos de la calificación utilizando la llave pública
+     * RSA del presidente
+     * y el método cegar() de ModuloAnonimatoRSA.
+     *
+     * @param nombreJuez        Nombre del juez que realizó la votación
+     * @param autorObra         Nombre del autor de la obra que se está firmando
+     * @param datosCalificacion Bytes de la calificación (si es null, busca y lee el
+     *                          acta correspondiente)
+     * @return Path del archivo cegado guardado
+     */
+    public Path cegarCalificacionJuez(String nombreJuez, String autorObra, byte[] datosCalificacion) {
+        if (!(motorAnonimato instanceof ModuloAnonimatoRSA moduloRSA)) {
+            System.out.println("[!] El módulo de anonimato RSA no está disponible para cegar la calificación.");
+            return null;
+        }
+
+        try {
+            // 1. Cargar la llave pública RSA del presidente desde
+            // "claves_usuario/presidente/presidente_RSA_pub.txt"
+            Path pathPubPresidente = Paths.get("claves_usuario", "presidente", "presidente_RSA_pub.txt");
+            if (!Files.exists(pathPubPresidente)) {
+                try (Stream<Path> s = Files.list(Paths.get("claves_usuario", "presidente"))) {
+                    pathPubPresidente = s.filter(p -> p.getFileName().toString().endsWith("_RSA_pub.txt"))
+                            .findFirst()
+                            .orElse(pathPubPresidente);
+                } catch (Exception ignored) {
+                }
+            }
+
+            if (!Files.exists(pathPubPresidente)) {
+                System.out.println("\n[!] No se encontró la llave pública RSA del presidente en: " + pathPubPresidente);
+                System.out.println("[!] Generando par de llaves RSA para el presidente...");
+                moduloRSA.generarYGuardarLlavesRSAPresidente("presidente");
+            }
+
+            RSAPublicKey pubPresidente = moduloRSA.cargarLlavePublica(pathPubPresidente);
+
+            // 2. Obtener los datos de la calificación a cegar
+            byte[] datosACegar = datosCalificacion;
+            if (datosACegar == null || datosACegar.length == 0) {
+                Path dirCalificaciones = Paths.get("calificaciones_jueces");
+                if (Files.exists(dirCalificaciones)) {
+                    try (Stream<Path> s = Files.list(dirCalificaciones)) {
+                        Path archivoActa = s.filter(p -> {
+                            String f = p.getFileName().toString().toLowerCase();
+                            return f.startsWith(nombreJuez.toLowerCase() + "_acta_")
+                                    && f.endsWith("_" + autorObra.toLowerCase() + ".txt");
+                        }).findFirst().orElse(null);
+
+                        if (archivoActa != null && Files.exists(archivoActa)) {
+                            datosACegar = Files.readAllBytes(archivoActa);
+                        }
+                    }
+                }
+            }
+
+            if (datosACegar == null || datosACegar.length == 0) {
+                String paquete = "JUEZ:" + nombreJuez + "|AUTOR:" + autorObra + "|ESTRELLAS:3";
+                datosACegar = paquete.getBytes(StandardCharsets.UTF_8);
+            } else if (datosACegar.length > 380) {
+                // Si el acta excede la capacidad de bloque de RSA 3072, usar paquete compacto
+                // de voto
+                int est = (this.ultimoVeredictoEstrellas >= 1 && this.ultimoVeredictoEstrellas <= 3)
+                        ? this.ultimoVeredictoEstrellas
+                        : 3;
+                String paquete = "JUEZ:" + nombreJuez + "|AUTOR:" + autorObra + "|ESTRELLAS:" + est;
+                datosACegar = paquete.getBytes(StandardCharsets.UTF_8);
+            }
+
+            // 3. Aplicar el método cegar de ModuloAnonimatoRSA
+            byte[] votoCegado = moduloRSA.cegar(datosACegar, pubPresidente);
+
+            this.ultimoVotoCegado = votoCegado;
+            this.ultimoFactorCegado = moduloRSA.getUltimoFactorCegado();
+            if (this.factoresCegado == null) {
+                this.factoresCegado = new LinkedHashMap<>();
+            }
+            this.factoresCegado.put(nombreJuez + "_" + autorObra, this.ultimoFactorCegado);
+
+            // 4. Guardar archivo cegado en "calificaciones_juces" (y
+            // "calificaciones_jueces")
+            // con el nombre: "nombrejuez_cegado_autorDeObra.txt"
+            String nombreConExt = nombreJuez + "_cegado_" + autorObra + ".txt";
+            String votoCegadoBase64 = Base64.getEncoder().encodeToString(votoCegado);
+
+            // Directorio solicitado: "calificaciones_juces"
+            Path dirJuces = Paths.get("calificaciones_juces");
+            Files.createDirectories(dirJuces);
+            Path pathJucesTxt = dirJuces.resolve(nombreConExt);
+            Files.writeString(pathJucesTxt, votoCegadoBase64, StandardCharsets.UTF_8);
+
+            // Directorio estándar: "calificaciones_jueces"
+            Path dirJueces = Paths.get("calificaciones_jueces");
+            Files.createDirectories(dirJueces);
+            Path pathJuecesTxt = dirJueces.resolve(nombreConExt);
+            Files.writeString(pathJuecesTxt, votoCegadoBase64, StandardCharsets.UTF_8);
+
+            this.ultimaRutaVotoCegado = pathJucesTxt;
+
+            // 5. Imprimir información de la operación en consola
+            System.out.println("==============================================================");
+            System.out.println(" CEGADO DE CALIFICACIÓN REALIZADO CON ÉXITO (FIRMA CIEGA)");
+            System.out.println("==============================================================");
+            System.out.println("Juez emisor del voto:          " + nombreJuez);
+            System.out.println("Autor de la obra:              " + autorObra);
+            System.out.println("Llave pública RSA del Presi:   " + pathPubPresidente);
+            System.out.println("Método de anonimato:           ModuloAnonimatoRSA.cegar(...)");
+            System.out.println("Tamaño de payload cegado:      " + votoCegado.length + " bytes");
+            System.out.println("Archivo cegado guardado en:    " + pathJucesTxt);
+            System.out.println("==============================================================\n");
+
+            return pathJucesTxt;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error al realizar el cegado de la calificación: " + e.getMessage());
+            return null;
+        }
+    }
+
+    public byte[] getUltimoVotoCegado() {
+        return ultimoVotoCegado;
+    }
+
+    public BigInteger getUltimoFactorCegado() {
+        return ultimoFactorCegado;
+    }
+
+    public Path getUltimaRutaVotoCegado() {
+        return ultimaRutaVotoCegado;
+    }
+
+    public BigInteger getFactorCegado(String nombreJuez, String autorObra) {
+        return factoresCegado != null ? factoresCegado.get(nombreJuez + "_" + autorObra) : null;
+    }
+
+    public Path getUltimaRutaFirmaCegadaPresidente() {
+        return ultimaRutaFirmaCegadaPresidente;
+    }
+
+    // =========================================================
+    // FIRMA CIEGA DE VOTOS POR EL PRESIDENTE (CHAUM RSA)
+    // =========================================================
+
+    /**
+     * Realiza la firma ciega por parte del presidente a un voto cegado emitido por
+     * un juez.
+     * Aplica la llave privada RSA del presidente (ubicada en
+     * "claves_usuario/presidente/presidente_RSA_priv.txt")
+     * al contenido del voto cegado que se encuentra en
+     * "calificaciones_jueces/nombreUsuario_cegado_nombreAutor.txt"
+     * y guarda la firma generada en
+     * "firmas_presidente/firma_nombreAutor_nombreJuez.txt".
+     *
+     * @param nombreJuez  Nombre del juez que emitió el voto (nombreUsuario)
+     * @param nombreAutor Nombre del autor de la obra evaluada
+     * @return Path del archivo de firma generado en firmas_presidente/
+     */
+    public Path firmarVotoCegadoPresidente(String nombreJuez, String nombreAutor) {
+        return firmarVotoCegadoPresidente(null, nombreJuez, nombreAutor);
+    }
+
+    /**
+     * Realiza la firma ciega por parte del presidente a un voto cegado emitido por
+     * un juez.
+     *
+     * @param presidente  Usuario presidente autenticado (opcional)
+     * @param nombreJuez  Nombre del juez que emitió el voto (nombreUsuario)
+     * @param nombreAutor Nombre del autor de la obra evaluada
+     * @return Path del archivo de firma generado en firmas_presidente/
+     */
+    public Path firmarVotoCegadoPresidente(Usuario presidente, String nombreJuez, String nombreAutor) {
+        try {
+            System.out.println("==============================================================");
+            System.out.println(" FIRMA CIEGA DE VOTO POR PARTE DEL PRESIDENTE (CHAUM RSA)");
+            System.out.println("==============================================================");
+
+            if (!(motorAnonimato instanceof ModuloAnonimatoRSA moduloRSA)) {
+                System.out.println("[!] El módulo de anonimato RSA no está disponible para firmar.");
+                return null;
+            }
+
+            // 1. Cargar la llave privada RSA del presidente desde
+            // "claves_usuario/presidente/presidente_RSA_priv.txt"
+            Path pathPriv = Paths.get("claves_usuario", "presidente", "presidente_RSA_priv.txt");
+            if (!Files.exists(pathPriv) && presidente != null && presidente.getNombreUsuario() != null) {
+                Path altPriv = Paths.get("claves_usuario", "presidente",
+                        presidente.getNombreUsuario() + "_RSA_priv.txt");
+                if (Files.exists(altPriv)) {
+                    pathPriv = altPriv;
+                }
+            }
+
+            if (!Files.exists(pathPriv)) {
+                Path dirPresidente = Paths.get("claves_usuario", "presidente");
+                if (Files.exists(dirPresidente)) {
+                    try (Stream<Path> st = Files.list(dirPresidente)) {
+                        Path privHallada = st.filter(p -> p.getFileName().toString().endsWith("_RSA_priv.txt"))
+                                .findFirst().orElse(null);
+                        if (privHallada != null) {
+                            pathPriv = privHallada;
+                        }
+                    }
+                }
+            }
+
+            if (!Files.exists(pathPriv)) {
+                String nomPresi = (presidente != null && presidente.getNombreUsuario() != null)
+                        ? presidente.getNombreUsuario()
+                        : "presidente";
+                moduloRSA.generarYGuardarLlavesRSAPresidente(nomPresi);
+                pathPriv = Paths.get("claves_usuario", "presidente", "presidente_RSA_priv.txt");
+                if (!Files.exists(pathPriv)) {
+                    pathPriv = Paths.get("claves_usuario", "presidente", nomPresi + "_RSA_priv.txt");
+                }
+            }
+
+            RSAPrivateKey privPresidente = moduloRSA.cargarLlavePrivada(pathPriv);
+
+            // 2. Cargar el voto cegado desde
+            // "calificaciones_jueces/nombreUsuario_cegado_nombreAutor.txt"
+            String nombreArchivoCegado = nombreJuez + "_cegado_" + nombreAutor + ".txt";
+            Path pathCegado = Paths.get("calificaciones_jueces", nombreArchivoCegado);
+
+            if (!Files.exists(pathCegado)) {
+                Path pathJuces = Paths.get("calificaciones_juces", nombreArchivoCegado);
+                if (Files.exists(pathJuces)) {
+                    pathCegado = pathJuces;
+                } else {
+                    Path encontrado = buscarArchivoCegadoInsensible(nombreJuez, nombreAutor);
+                    if (encontrado != null) {
+                        pathCegado = encontrado;
+                    } else {
+                        System.out.println("[!] No se encontró el archivo de voto cegado en: " + pathCegado);
+                        return null;
+                    }
+                }
+            }
+
+            String contenidoB64 = Files.readString(pathCegado, StandardCharsets.UTF_8).trim();
+            byte[] bytesCegados = Base64.getDecoder().decode(contenidoB64);
+            if (bytesCegados == null || bytesCegados.length == 0) {
+                System.out.println("[!] El archivo de voto cegado no contiene bytes válidos: " + pathCegado);
+                return null;
+            }
+
+            // 3. Aplicar la firma ciega RSA: s' = (m')^d mod N
+            byte[] firmaCegada = moduloRSA.firmarCegadoRSA(bytesCegados, privPresidente);
+
+            // 4. Guardar la firma en "firmas_presidente/firma_nombreAutor_nombreJuez.txt"
+            Path dirFirmas = Paths.get("firmas_presidente");
+            Files.createDirectories(dirFirmas);
+            String nombreArchivoFirma = "firma_" + nombreAutor + "_" + nombreJuez + ".txt";
+            Path pathFirma = dirFirmas.resolve(nombreArchivoFirma);
+
+            String firmaB64 = Base64.getEncoder().encodeToString(firmaCegada);
+            Files.writeString(pathFirma, firmaB64, StandardCharsets.UTF_8);
+
+            this.ultimaRutaFirmaCegadaPresidente = pathFirma;
+
+            // 5. Imprimir información de la operación en consola
+            System.out.println("Presidente firmante:           "
+                    + (presidente != null ? presidente.getNombreUsuario() : "presidente"));
+            System.out.println("Juez emisor del voto:          " + nombreJuez);
+            System.out.println("Autor de la obra:              " + nombreAutor);
+            System.out.println("Llave privada RSA empleada:    " + pathPriv);
+            System.out.println("Archivo de voto cegado leído:  " + pathCegado);
+            System.out.println("Tamaño de firma ciega:         " + firmaCegada.length + " bytes");
+            System.out.println("Firma ciega guardada en:       " + pathFirma);
+            System.out.println("==============================================================\n");
+
+            return pathFirma;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error al realizar la firma ciega del presidente: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Búsqueda insensible a mayúsculas y minúsculas para archivos de voto cegado.
+     */
+    private Path buscarArchivoCegadoInsensible(String nombreJuez, String nombreAutor) {
+        Path[] carpetas = { Paths.get("calificaciones_jueces"), Paths.get("calificaciones_juces") };
+        String sufijoEsperado = ("_cegado_" + nombreAutor + ".txt").toLowerCase();
+        String prefijoEsperado = (nombreJuez + "_cegado_").toLowerCase();
+
+        for (Path dir : carpetas) {
+            if (Files.exists(dir)) {
+                try (Stream<Path> st = Files.list(dir)) {
+                    Path hallado = st.filter(p -> {
+                        String f = p.getFileName().toString().toLowerCase();
+                        return f.startsWith(prefijoEsperado) && f.endsWith(sufijoEsperado);
+                    }).findFirst().orElse(null);
+                    if (hallado != null) {
+                        return hallado;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Interfaz interactiva de consola para que el presidente firme votos cegados.
+     */
+    public void firmarVotosCegadosInteractivo(Usuario presidente) {
+        System.out.println("\n==============================================================");
+        System.out.println(" FIRMA CIEGA DE VOTOS DE JUECES (PRESIDENTE)");
+        System.out.println("==============================================================");
+
+        List<Path> votosPendientes = listarVotosCegadosDisponibles();
+        if (votosPendientes.isEmpty()) {
+            System.out.println("[!] No se encontraron archivos de votos cegados en 'calificaciones_jueces'.");
+            System.out.println("    Asegúrese de que los jueces hayan emitido y cegado sus calificaciones.");
+            System.out.println("--------------------------------------------------------------");
+            System.out.print("¿Desea ingresar el nombre del Juez y Autor manualmente? (s/n): ");
+            String resp = scanner.nextLine().trim();
+            if ("s".equalsIgnoreCase(resp)) {
+                System.out.print("Ingrese nombre del Juez: ");
+                String juez = scanner.nextLine().trim();
+                System.out.print("Ingrese nombre del Autor: ");
+                String autor = scanner.nextLine().trim();
+                if (!juez.isEmpty() && !autor.isEmpty()) {
+                    firmarVotoCegadoPresidente(presidente, juez, autor);
+                }
+            }
+            return;
+        }
+
+        System.out.println("Votos cegados detectados pendientes de firma:");
+        for (int i = 0; i < votosPendientes.size(); i++) {
+            Path p = votosPendientes.get(i);
+            String fn = p.getFileName().toString();
+            String[] datos = extraerJuezYAutorDeNombre(fn);
+            String detalle = (datos != null)
+                    ? "Juez: " + datos[0] + " | Autor: " + datos[1]
+                    : fn;
+            System.out.println((i + 1) + ". " + fn + "  [" + detalle + "]");
+        }
+        System.out.println((votosPendientes.size() + 1) + ". Firmar TODOS los votos detectados");
+        System.out.println("0. Regresar");
+        System.out.print("Seleccione una opción: ");
+        String op = scanner.nextLine().trim();
+
+        try {
+            int opNum = Integer.parseInt(op);
+            if (opNum == 0) {
+                return;
+            }
+            if (opNum == votosPendientes.size() + 1) {
+                for (Path p : votosPendientes) {
+                    String[] datos = extraerJuezYAutorDeNombre(p.getFileName().toString());
+                    if (datos != null) {
+                        firmarVotoCegadoPresidente(presidente, datos[0], datos[1]);
+                    }
+                }
+            } else if (opNum >= 1 && opNum <= votosPendientes.size()) {
+                Path p = votosPendientes.get(opNum - 1);
+                String[] datos = extraerJuezYAutorDeNombre(p.getFileName().toString());
+                if (datos != null) {
+                    firmarVotoCegadoPresidente(presidente, datos[0], datos[1]);
+                }
+            } else {
+                System.out.println("[!] Opción inválida.");
+            }
+        } catch (NumberFormatException e) {
+            System.out.println("[!] Opción inválida.");
+        }
+    }
+
+    /**
+     * Lista todos los archivos de voto cegado disponibles en calificaciones_jueces.
+     */
+    public List<Path> listarVotosCegadosDisponibles() {
+        List<Path> lista = new ArrayList<>();
+        Path dir = Paths.get("calificaciones_jueces");
+        if (Files.exists(dir)) {
+            try (Stream<Path> st = Files.list(dir)) {
+                st.filter(p -> {
+                    String fn = p.getFileName().toString();
+                    return fn.endsWith(".txt") && fn.contains("_cegado_");
+                }).forEach(lista::add);
+            } catch (Exception ignored) {
+            }
+        }
+        return lista;
+    }
+
+    /**
+     * Extrae el nombre del juez y del autor a partir del nombre del archivo:
+     * "nombreUsuario_cegado_nombreAutor.txt" -> [nombreUsuario, nombreAutor].
+     */
+    public String[] extraerJuezYAutorDeNombre(String fileName) {
+        String base = fileName.toLowerCase().endsWith(".txt")
+                ? fileName.substring(0, fileName.length() - 4)
+                : fileName;
+        int idx = base.indexOf("_cegado_");
+        if (idx > 0) {
+            String juez = base.substring(0, idx);
+            String autor = base.substring(idx + "_cegado_".length());
+            return new String[] { juez, autor };
+        }
+        return null;
+    }
+
     private void menuPresidente(Usuario presidente) {
 
         // Inicializar llaves EC del presidente (cargar existentes o generar nuevas)
         inicializarLlavesPresidente();
+
+        // Inicializar o generar llaves RSA del presidente para la firma ciega de Chaum
+        inicializarOGenerarLlavesRSAPresidente(presidente);
 
         boolean regresar = false;
 
@@ -1637,10 +2357,11 @@ public class MenuPrincipalConsola {
                     "\n--- Panel del Presidente ("
                             + presidente.getNombreUsuario() + ") ---");
 
-            System.out.println("1. Realizar firma ciega de los votos (Simulación RSA)");
+            System.out.println("1. Realizar firma ciega de voto de un Juez (Chaum RSA)");
             System.out.println("2. Emitir y firmar Acta de Resultados (RSASSA-PSS - FIPS 186-5)");
             System.out.println("3. Verificar firma de un Acta de Resultados existente");
-            System.out.println("4. Regresar al menú de inicio");
+            System.out.println("4. Simulación de firma ciega (RSA Chaum)");
+            System.out.println("5. Regresar al menú de inicio");
             System.out.print("Seleccione una opción: ");
 
             String op = scanner.nextLine().trim();
@@ -1648,9 +2369,7 @@ public class MenuPrincipalConsola {
             switch (op) {
 
                 case "1":
-                    System.out.println(
-                            "\n[Simulación]: Realizar firma ciega.");
-                    simulacionPresidente();
+                    firmarVotosCegadosInteractivo(presidente);
                     break;
 
                 case "2":
@@ -1662,6 +2381,12 @@ public class MenuPrincipalConsola {
                     break;
 
                 case "4":
+                    System.out.println(
+                            "\n[Simulación]: Realizar firma ciega.");
+                    simulacionPresidente();
+                    break;
+
+                case "5":
                     regresar = true;
                     break;
 
