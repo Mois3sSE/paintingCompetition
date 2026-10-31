@@ -4,7 +4,7 @@
 Juez Evaluador:       juez1
 Obra Evaluada:        bandera
 Autor / Pintor:       juan
-Estrellas:            3
+Estrellas:            1
 Comentario de la obra:
-buena
+Evaluación emitida por juez1
 ====================================================

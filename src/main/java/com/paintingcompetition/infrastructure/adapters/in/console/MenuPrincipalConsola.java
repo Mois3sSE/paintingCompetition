@@ -1,4 +1,4 @@
-﻿package com.paintingcompetition.infrastructure.adapters.in.console;
+package com.paintingcompetition.infrastructure.adapters.in.console;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -29,10 +29,19 @@ import java.util.TreeSet;
 import java.util.stream.Stream;
 import java.util.Map;
 import java.util.LinkedHashMap;
+import java.util.Collections;
 
 import com.paintingcompetition.domain.ports.out.RegistroECDSAPort;
 import com.paintingcompetition.domain.ports.out.ConfidencialidadAESPort;
 import javax.crypto.SecretKey;
+import java.awt.image.BufferedImage;
+import java.awt.Graphics2D;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.BasicStroke;
+import java.awt.Desktop;
+import java.awt.GraphicsEnvironment;
+import javax.imageio.ImageIO;
 
 public class MenuPrincipalConsola {
 
@@ -43,7 +52,6 @@ public class MenuPrincipalConsola {
             { "juez1", "1234" },
             { "juez2", "juez2026" },
             { "juez3", "juezPass" },
-            { "carlos", "clave123" }
     };
 
     private static final String[][] USUARIOS_PRESIDENTE = {
@@ -113,6 +121,10 @@ public class MenuPrincipalConsola {
     // Última firma ciega emitida por el presidente sobre un voto
     private Path ultimaRutaFirmaCegadaPresidente;
 
+    // Última firma descegada por el juez
+    private byte[] ultimaFirmaDescegada;
+    private Path ultimaRutaFirmaDescegada;
+
     public MenuPrincipalConsola(
             MotorCriptograficoPort motorConfidencialidad,
             MotorCriptograficoPort motorRegistro,
@@ -141,7 +153,8 @@ public class MenuPrincipalConsola {
 
             System.out.println("\n--- Menú Principal: Inicio de Sesión Simulado ---");
             System.out.println("1. Iniciar sesión");
-            System.out.println("2. Salir");
+            System.out.println("2. Mostrar resultados");
+            System.out.println("3. Salir");
             System.out.print("Seleccione una opción: ");
 
             String opcion = scanner.nextLine().trim();
@@ -153,12 +166,16 @@ public class MenuPrincipalConsola {
                     break;
 
                 case "2":
+                    mostrarResultadosConcurso();
+                    break;
+
+                case "3":
                     System.out.println("\nSaliendo del sistema. Hasta pronto.");
                     salir = true;
                     break;
 
                 default:
-                    System.out.println("\n[!] Opción no válida. Por favor ingrese 1 o 2.");
+                    System.out.println("\n[!] Opción no válida. Por favor ingrese 1, 2 o 3.");
             }
         }
     }
@@ -1212,8 +1229,8 @@ public class MenuPrincipalConsola {
                     "\n--- Panel del Juez ("
                             + juez.getNombreUsuario() + ") ---");
 
-            System.out.println("1. Ver imágenes");
-            System.out.println("2. Validar firma ciega de obra anónima");
+            System.out.println("1. Ver imágenes y calificar obra");
+            System.out.println("2. Descegar firma de calificación (Recuperar voto firmado por el Presidente)");
             System.out.println("3. Calificar obra");
             System.out.println("4. Regresar al menú de inicio");
             System.out.print("Seleccione una opción: ");
@@ -1227,8 +1244,7 @@ public class MenuPrincipalConsola {
                     break;
 
                 case "2":
-                    System.out.println(
-                            "\n[Simulación]: Verificación con ModuloAnonimatoRSA...");
+                    descegarFirmaInteractivo(juez);
                     break;
 
                 case "3":
@@ -1922,13 +1938,12 @@ public class MenuPrincipalConsola {
      * del presidente
      * localizada en "claves_usuario/presidente/presidente_RSA_pub.txt" y el método
      * cegar() de ModuloAnonimatoRSA.
-     * Guarda el archivo cegado en "calificaciones_juces" (y
-     * "calificaciones_jueces") con el nombre
-     * "nombrejuez_cegado_autorDeObra" (.txt).
+     * Guarda el archivo cegado en "calificaciones_jueces" con el nombre
+     * "nombrejuez_cegado_autorDeObra.txt".
      *
      * @param nombreJuez Nombre del juez que realizó la votación
      * @param autorObra  Nombre del autor de la obra que se está firmando
-     * @return Path del archivo cegado guardado en calificaciones_juces/
+     * @return Path del archivo cegado guardado en calificaciones_jueces/
      */
     public Path cegarCalificacionJuez(String nombreJuez, String autorObra) {
         return cegarCalificacionJuez(nombreJuez, autorObra, null);
@@ -2014,25 +2029,26 @@ public class MenuPrincipalConsola {
             }
             this.factoresCegado.put(nombreJuez + "_" + autorObra, this.ultimoFactorCegado);
 
-            // 4. Guardar archivo cegado en "calificaciones_juces" (y
-            // "calificaciones_jueces")
+            // Persistir factor de cegado del juez para permitir descegado entre sesiones
+            try {
+                Path dirJuez = Paths.get("claves_usuario", "jueces", nombreJuez);
+                Files.createDirectories(dirJuez);
+                Path pathFactor = dirJuez.resolve("factor_cegado_" + autorObra + ".txt");
+                Files.writeString(pathFactor, this.ultimoFactorCegado.toString(), StandardCharsets.UTF_8);
+            } catch (Exception ignored) {
+            }
+
+            // 4. Guardar archivo cegado en "calificaciones_jueces"
             // con el nombre: "nombrejuez_cegado_autorDeObra.txt"
             String nombreConExt = nombreJuez + "_cegado_" + autorObra + ".txt";
             String votoCegadoBase64 = Base64.getEncoder().encodeToString(votoCegado);
 
-            // Directorio solicitado: "calificaciones_juces"
-            Path dirJuces = Paths.get("calificaciones_juces");
-            Files.createDirectories(dirJuces);
-            Path pathJucesTxt = dirJuces.resolve(nombreConExt);
-            Files.writeString(pathJucesTxt, votoCegadoBase64, StandardCharsets.UTF_8);
-
-            // Directorio estándar: "calificaciones_jueces"
             Path dirJueces = Paths.get("calificaciones_jueces");
             Files.createDirectories(dirJueces);
             Path pathJuecesTxt = dirJueces.resolve(nombreConExt);
             Files.writeString(pathJuecesTxt, votoCegadoBase64, StandardCharsets.UTF_8);
 
-            this.ultimaRutaVotoCegado = pathJucesTxt;
+            this.ultimaRutaVotoCegado = pathJuecesTxt;
 
             // 5. Imprimir información de la operación en consola
             System.out.println("==============================================================");
@@ -2043,10 +2059,10 @@ public class MenuPrincipalConsola {
             System.out.println("Llave pública RSA del Presi:   " + pathPubPresidente);
             System.out.println("Método de anonimato:           ModuloAnonimatoRSA.cegar(...)");
             System.out.println("Tamaño de payload cegado:      " + votoCegado.length + " bytes");
-            System.out.println("Archivo cegado guardado en:    " + pathJucesTxt);
+            System.out.println("Archivo cegado guardado en:    " + pathJuecesTxt);
             System.out.println("==============================================================\n");
 
-            return pathJucesTxt;
+            return pathJuecesTxt;
 
         } catch (Exception e) {
             System.out.println("\n[!] Error al realizar el cegado de la calificación: " + e.getMessage());
@@ -2067,11 +2083,348 @@ public class MenuPrincipalConsola {
     }
 
     public BigInteger getFactorCegado(String nombreJuez, String autorObra) {
-        return factoresCegado != null ? factoresCegado.get(nombreJuez + "_" + autorObra) : null;
+        return obtenerFactorCegado(nombreJuez, autorObra);
+    }
+
+    public BigInteger obtenerFactorCegado(String nombreJuez, String autorObra) {
+        if (factoresCegado != null) {
+            BigInteger f = factoresCegado.get(nombreJuez + "_" + autorObra);
+            if (f != null) {
+                return f;
+            }
+            for (Map.Entry<String, BigInteger> entry : factoresCegado.entrySet()) {
+                if (entry.getKey().equalsIgnoreCase(nombreJuez + "_" + autorObra)) {
+                    return entry.getValue();
+                }
+            }
+        }
+        // Buscar factor persistido en
+        // claves_usuario/jueces/<nombreJuez>/factor_cegado_<autorObra>.txt
+        try {
+            Path pathFactor = Paths.get("claves_usuario", "jueces", nombreJuez, "factor_cegado_" + autorObra + ".txt");
+            if (Files.exists(pathFactor)) {
+                String val = Files.readString(pathFactor, StandardCharsets.UTF_8).trim();
+                BigInteger factorLeido = new BigInteger(val);
+                if (this.factoresCegado == null) {
+                    this.factoresCegado = new LinkedHashMap<>();
+                }
+                this.factoresCegado.put(nombreJuez + "_" + autorObra, factorLeido);
+                return factorLeido;
+            }
+        } catch (Exception ignored) {
+        }
+
+        return this.ultimoFactorCegado;
+    }
+
+    public byte[] obtenerDatosVotoOriginal(String nombreJuez, String autorObra) {
+        Path dirCalificaciones = Paths.get("calificaciones_jueces");
+        if (Files.exists(dirCalificaciones)) {
+            try (Stream<Path> s = Files.list(dirCalificaciones)) {
+                Path archivoActa = s.filter(p -> {
+                    String f = p.getFileName().toString().toLowerCase();
+                    return f.startsWith(nombreJuez.toLowerCase() + "_acta_")
+                            && f.endsWith("_" + autorObra.toLowerCase() + ".txt");
+                }).findFirst().orElse(null);
+
+                if (archivoActa != null && Files.exists(archivoActa)) {
+                    byte[] bytes = Files.readAllBytes(archivoActa);
+                    if (bytes.length <= 380) {
+                        return bytes;
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        int est = (this.ultimoVeredictoEstrellas >= 1 && this.ultimoVeredictoEstrellas <= 3)
+                ? this.ultimoVeredictoEstrellas
+                : 3;
+        String paquete = "JUEZ:" + nombreJuez + "|AUTOR:" + autorObra + "|ESTRELLAS:" + est;
+        return paquete.getBytes(StandardCharsets.UTF_8);
     }
 
     public Path getUltimaRutaFirmaCegadaPresidente() {
         return ultimaRutaFirmaCegadaPresidente;
+    }
+
+    public byte[] getUltimaFirmaDescegada() {
+        return ultimaFirmaDescegada;
+    }
+
+    public Path getUltimaRutaFirmaDescegada() {
+        return ultimaRutaFirmaDescegada;
+    }
+
+    // =========================================================
+    // DESCEGADO DE FIRMA POR EL JUEZ (CHAUM RSA)
+    // =========================================================
+
+    /**
+     * Realiza el descegado de la firma del presidente por parte del juez
+     * utilizando el método descegarFirmaRSA de ModuloAnonimatoRSA.
+     * Recupera el voto con la firma del presidente y guarda el archivo descegado
+     * en "calificaciones_jueces/NombreJuez_descegado_autorObra.txt".
+     *
+     * @param nombreJuez Nombre del juez que realizó la votación (NombreJuez)
+     * @param autorObra  Nombre del autor de la obra evaluada (autorObra)
+     * @return Path del archivo descegado generado en calificaciones_jueces/
+     */
+    public Path descegarFirmaJuez(String nombreJuez, String autorObra) {
+        try {
+            System.out.println("==============================================================");
+            System.out.println(" DESCEGADO DE FIRMA POR EL JUEZ (CHAUM RSA)");
+            System.out.println("==============================================================");
+
+            if (!(motorAnonimato instanceof ModuloAnonimatoRSA moduloRSA)) {
+                System.out.println("[!] El módulo de anonimato RSA no está disponible para descegar.");
+                return null;
+            }
+
+            // 1. Cargar la llave pública RSA del presidente
+            Path pathPubPresidente = Paths.get("claves_usuario", "presidente", "presidente_RSA_pub.txt");
+            if (!Files.exists(pathPubPresidente)) {
+                Path dirPresi = Paths.get("claves_usuario", "presidente");
+                if (Files.exists(dirPresi)) {
+                    try (Stream<Path> st = Files.list(dirPresi)) {
+                        Path pubAlt = st.filter(p -> p.getFileName().toString().endsWith("_RSA_pub.txt"))
+                                .findFirst().orElse(null);
+                        if (pubAlt != null) {
+                            pathPubPresidente = pubAlt;
+                        }
+                    }
+                }
+            }
+
+            if (!Files.exists(pathPubPresidente)) {
+                System.out.println("[!] No se encontró la llave pública RSA del presidente en: " + pathPubPresidente);
+                return null;
+            }
+
+            RSAPublicKey pubPresidente = moduloRSA.cargarLlavePublica(pathPubPresidente);
+
+            // 2. Obtener el archivo de firma ciega en
+            // "firmas_presidente/firma_nombreAutor_nombreJuez.txt"
+            Path dirFirmas = Paths.get("firmas_presidente");
+            Path pathFirma = dirFirmas.resolve("firma_" + autorObra + "_" + nombreJuez + ".txt");
+            if (!Files.exists(pathFirma)) {
+                Path altFirma = dirFirmas.resolve("firma_" + nombreJuez + "_" + autorObra + ".txt");
+                if (Files.exists(altFirma)) {
+                    pathFirma = altFirma;
+                } else {
+                    Path encontrada = buscarFirmaPresidenteInsensible(nombreJuez, autorObra);
+                    if (encontrada != null) {
+                        pathFirma = encontrada;
+                    } else {
+                        System.out.println("[!] No se encontró el archivo de firma del presidente en: " + pathFirma);
+                        return null;
+                    }
+                }
+            }
+
+            String firmaB64 = Files.readString(pathFirma, StandardCharsets.UTF_8).trim();
+            byte[] firmaCegada = Base64.getDecoder().decode(firmaB64);
+            if (firmaCegada == null || firmaCegada.length == 0) {
+                System.out.println("[!] El archivo de firma del presidente está vacío: " + pathFirma);
+                return null;
+            }
+
+            // 3. Obtener el factor de cegado r utilizado previamente por el juez
+            BigInteger factor = obtenerFactorCegado(nombreJuez, autorObra);
+            if (factor == null) {
+                System.out.println("[!] No se encontró el factor de cegado para el juez '" + nombreJuez + "' y autor '"
+                        + autorObra + "'.");
+                return null;
+            }
+
+            // 4. Descegar la firma utilizando descegarFirmaRSA: s = s' * r^(-1) mod N
+            byte[] firmaDescegada = moduloRSA.descegarFirmaRSA(firmaCegada, factor, pubPresidente);
+
+            // 5. Guardar el archivo descegado en
+            // "calificaciones_jueces/NombreJuez_descegado_autorObra.txt"
+            Path dirCalificaciones = Paths.get("calificaciones_jueces");
+            Files.createDirectories(dirCalificaciones);
+            String nombreArchivoDescegado = nombreJuez + "_descegado_" + autorObra + ".txt";
+            Path pathDescegado = dirCalificaciones.resolve(nombreArchivoDescegado);
+
+            String firmaDescegadaB64 = Base64.getEncoder().encodeToString(firmaDescegada);
+            Files.writeString(pathDescegado, firmaDescegadaB64, StandardCharsets.UTF_8);
+
+            this.ultimaFirmaDescegada = firmaDescegada;
+            this.ultimaRutaFirmaDescegada = pathDescegado;
+
+            // 6. Verificar matemáticamente contra los datos originales del voto si están
+            // disponibles
+            byte[] datosOriginales = obtenerDatosVotoOriginal(nombreJuez, autorObra);
+            boolean verificacionOk = false;
+            if (datosOriginales != null) {
+                verificacionOk = moduloRSA.verificarFirmaRSA(datosOriginales, firmaDescegada, pubPresidente);
+            }
+
+            // 7. Imprimir información de la operación en consola
+            System.out.println("Juez solicitante:              " + nombreJuez);
+            System.out.println("Autor de la obra:              " + autorObra);
+            System.out.println("Archivo de firma de entrada:   " + pathFirma);
+            System.out.println("Llave pública RSA del Presi:   " + pathPubPresidente);
+            System.out.println("Método de anonimato:           ModuloAnonimatoRSA.descegarFirmaRSA(...)");
+            System.out.println("Tamaño de firma descegada:     " + firmaDescegada.length + " bytes");
+            System.out.println("Archivo descegado guardado en: " + pathDescegado);
+            if (datosOriginales != null) {
+                System.out.println("Verificación de autenticidad:  "
+                        + (verificacionOk ? "[OK] AUTÉNTICA Y VÁLIDA (Firma válida del Presidente)"
+                                : "[!] VERIFICACIÓN FALLIDA"));
+            }
+            System.out.println("==============================================================\n");
+
+            return pathDescegado;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error al descegar la firma del presidente: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Sobrecarga que recibe el objeto Usuario del juez.
+     */
+    public Path descegarFirmaJuez(Usuario juez, String autorObra) {
+        String nombreJuez = (juez != null && juez.getNombreUsuario() != null)
+                ? juez.getNombreUsuario()
+                : (this.juezAutenticado != null ? this.juezAutenticado.getNombreUsuario() : "juez1");
+        return descegarFirmaJuez(nombreJuez, autorObra);
+    }
+
+    /**
+     * Interfaz interactiva de consola para que el juez descegue la firma del
+     * presidente.
+     */
+    public void descegarFirmaInteractivo(Usuario juez) {
+        String nombreJuez = (juez != null && juez.getNombreUsuario() != null)
+                ? juez.getNombreUsuario()
+                : (this.juezAutenticado != null ? this.juezAutenticado.getNombreUsuario() : "juez1");
+
+        System.out.println("\n==============================================================");
+        System.out.println(" DESCEGAR FIRMA DEL PRESIDENTE (JUEZ: " + nombreJuez + ")");
+        System.out.println("==============================================================");
+
+        List<Path> firmasDisponibles = listarFirmasPresidenteParaJuez(nombreJuez);
+        if (firmasDisponibles.isEmpty()) {
+            System.out.println("[!] No se encontraron archivos de firmas en 'firmas_presidente' para el juez '"
+                    + nombreJuez + "'.");
+            System.out.println("    Asegúrese de que el presidente haya firmado el voto previamente.");
+            System.out.println("--------------------------------------------------------------");
+            System.out.print("¿Desea ingresar el nombre del Autor de la obra manualmente? (s/n): ");
+            String resp = scanner.nextLine().trim();
+            if ("s".equalsIgnoreCase(resp)) {
+                System.out.print("Ingrese nombre del Autor de la obra: ");
+                String autor = scanner.nextLine().trim();
+                if (!autor.isEmpty()) {
+                    descegarFirmaJuez(nombreJuez, autor);
+                }
+            }
+            return;
+        }
+
+        System.out.println("Firmas del presidente detectadas para descegar:");
+        for (int i = 0; i < firmasDisponibles.size(); i++) {
+            Path p = firmasDisponibles.get(i);
+            String fn = p.getFileName().toString();
+            String autor = extraerAutorDeFirmaPresidente(fn, nombreJuez);
+            System.out.println((i + 1) + ". " + fn + "  [Autor de la obra: " + autor + "]");
+        }
+        System.out.println((firmasDisponibles.size() + 1) + ". Descegar TODAS las firmas detectadas");
+        System.out.println("0. Regresar");
+        System.out.print("Seleccione una opción: ");
+        String op = scanner.nextLine().trim();
+
+        try {
+            int opNum = Integer.parseInt(op);
+            if (opNum == 0) {
+                return;
+            }
+            if (opNum == firmasDisponibles.size() + 1) {
+                for (Path p : firmasDisponibles) {
+                    String autor = extraerAutorDeFirmaPresidente(p.getFileName().toString(), nombreJuez);
+                    if (autor != null) {
+                        descegarFirmaJuez(nombreJuez, autor);
+                    }
+                }
+            } else if (opNum >= 1 && opNum <= firmasDisponibles.size()) {
+                Path p = firmasDisponibles.get(opNum - 1);
+                String autor = extraerAutorDeFirmaPresidente(p.getFileName().toString(), nombreJuez);
+                if (autor != null) {
+                    descegarFirmaJuez(nombreJuez, autor);
+                }
+            } else {
+                System.out.println("[!] Opción inválida.");
+            }
+        } catch (NumberFormatException e) {
+            System.out.println("[!] Opción inválida.");
+        }
+    }
+
+    /**
+     * Lista los archivos en 'firmas_presidente' correspondientes a un juez
+     * específico.
+     */
+    public List<Path> listarFirmasPresidenteParaJuez(String nombreJuez) {
+        List<Path> lista = new ArrayList<>();
+        Path dir = Paths.get("firmas_presidente");
+        if (Files.exists(dir)) {
+            String sufijo = ("_" + nombreJuez + ".txt").toLowerCase();
+            try (Stream<Path> st = Files.list(dir)) {
+                st.filter(p -> {
+                    String fn = p.getFileName().toString().toLowerCase();
+                    return fn.startsWith("firma_")
+                            && (fn.endsWith(sufijo) || fn.contains("_" + nombreJuez.toLowerCase() + "_"));
+                }).forEach(lista::add);
+            } catch (Exception ignored) {
+            }
+        }
+        return lista;
+    }
+
+    /**
+     * Extrae el autor de la obra a partir del nombre del archivo de firma:
+     * "firma_nombreAutor_nombreJuez.txt" -> "nombreAutor".
+     */
+    public String extraerAutorDeFirmaPresidente(String fileName, String nombreJuez) {
+        String base = fileName.toLowerCase().endsWith(".txt")
+                ? fileName.substring(0, fileName.length() - 4)
+                : fileName;
+        if (base.toLowerCase().startsWith("firma_")) {
+            base = base.substring("firma_".length());
+        }
+        String sufijoJuez = "_" + nombreJuez.toLowerCase();
+        if (base.toLowerCase().endsWith(sufijoJuez)) {
+            return base.substring(0, base.length() - sufijoJuez.length());
+        }
+        String prefijoJuez = nombreJuez.toLowerCase() + "_";
+        if (base.toLowerCase().startsWith(prefijoJuez)) {
+            return base.substring(prefijoJuez.length());
+        }
+        return base;
+    }
+
+    /**
+     * Búsqueda insensible a mayúsculas de la firma del presidente.
+     */
+    private Path buscarFirmaPresidenteInsensible(String nombreJuez, String autorObra) {
+        Path dir = Paths.get("firmas_presidente");
+        if (!Files.exists(dir)) {
+            return null;
+        }
+
+        String patron1 = ("firma_" + autorObra + "_" + nombreJuez + ".txt").toLowerCase();
+        String patron2 = ("firma_" + nombreJuez + "_" + autorObra + ".txt").toLowerCase();
+
+        try (Stream<Path> st = Files.list(dir)) {
+            return st.filter(p -> {
+                String fn = p.getFileName().toString().toLowerCase();
+                return fn.equals(patron1) || fn.equals(patron2);
+            }).findFirst().orElse(null);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     // =========================================================
@@ -2159,17 +2512,12 @@ public class MenuPrincipalConsola {
             Path pathCegado = Paths.get("calificaciones_jueces", nombreArchivoCegado);
 
             if (!Files.exists(pathCegado)) {
-                Path pathJuces = Paths.get("calificaciones_juces", nombreArchivoCegado);
-                if (Files.exists(pathJuces)) {
-                    pathCegado = pathJuces;
+                Path encontrado = buscarArchivoCegadoInsensible(nombreJuez, nombreAutor);
+                if (encontrado != null) {
+                    pathCegado = encontrado;
                 } else {
-                    Path encontrado = buscarArchivoCegadoInsensible(nombreJuez, nombreAutor);
-                    if (encontrado != null) {
-                        pathCegado = encontrado;
-                    } else {
-                        System.out.println("[!] No se encontró el archivo de voto cegado en: " + pathCegado);
-                        return null;
-                    }
+                    System.out.println("[!] No se encontró el archivo de voto cegado en: " + pathCegado);
+                    return null;
                 }
             }
 
@@ -2217,7 +2565,7 @@ public class MenuPrincipalConsola {
      * Búsqueda insensible a mayúsculas y minúsculas para archivos de voto cegado.
      */
     private Path buscarArchivoCegadoInsensible(String nombreJuez, String nombreAutor) {
-        Path[] carpetas = { Paths.get("calificaciones_jueces"), Paths.get("calificaciones_juces") };
+        Path[] carpetas = { Paths.get("calificaciones_jueces") };
         String sufijoEsperado = ("_cegado_" + nombreAutor + ".txt").toLowerCase();
         String prefijoEsperado = (nombreJuez + "_cegado_").toLowerCase();
 
@@ -2492,10 +2840,10 @@ public class MenuPrincipalConsola {
                         + " ACTA OFICIAL DE RESULTADOS - CONCURSO DE PINTURA 2026\n"
                         + " EMISOR: Presidente (" + presidente.getNombreUsuario() + ")\n"
                         + "====================================================\n"
-                        + "1er Lugar: 'Amanecer en el Valle' - Promedio: 3★\n"
-                        + "2do Lugar: 'Sombras de Otoño'     - Promedio: 2★\n"
-                        + "3er Lugar: 'Horizonte Azul'      - Promedio: 1★\n\n"
-                        + "Certificación oficial: Se declaran los resultados válidos, inalterables\n"
+                        + "1er Lugar: 'Amanecer en el Valle' - Promedio: 3.00\n"
+                        + "2do Lugar: 'Sombras de Otono'     - Promedio: 2.00\n"
+                        + "3er Lugar: 'Horizonte Azul'      - Promedio: 1.00\n\n"
+                        + "Certificacion oficial: Se declaran los resultados validos, inalterables\n"
                         + "y respaldados bajo el esquema de firma digital FIPS 186-5.\n"
                         + "====================================================\n";
                 Files.writeString(Paths.get(rutaActa), plantillaActa, StandardCharsets.UTF_8);
@@ -2690,5 +3038,597 @@ public class MenuPrincipalConsola {
         } catch (Exception e) {
             System.out.println("Ocurrio un error en la simulacion ");
         }
+    }
+
+    // =========================================================
+    // MOSTRAR RESULTADOS DEL CONCURSO (VERIFICACIÓN CHAUM RSA)
+    // =========================================================
+
+    public static class ResultadoObraItem {
+        public final String obra;
+        public final String autor;
+        public final String juez;
+        public final int estrellasNum;
+        public final String calificacion;
+
+        public ResultadoObraItem(String obra, String autor, String juez, int estrellasNum, String calificacion) {
+            this.obra = obra;
+            this.autor = autor;
+            this.juez = juez;
+            this.estrellasNum = estrellasNum;
+            this.calificacion = calificacion;
+        }
+
+        public ResultadoObraItem(String obra, String autor, String calificacion) {
+            this(obra, autor, "juez", 3, calificacion);
+        }
+    }
+
+    public static class ResumenClasificacionObra {
+        public final String obra;
+        public final String autor;
+        public final List<VotoJuezDetalle> votos = new ArrayList<>();
+        public int suma;
+        public double promedio;
+        public int lugar;
+
+        public ResumenClasificacionObra(String obra, String autor) {
+            this.obra = obra;
+            this.autor = autor;
+        }
+
+        public void agregarVoto(String juez, int estrellas) {
+            votos.add(new VotoJuezDetalle(juez, estrellas));
+            suma += estrellas;
+            promedio = votos.isEmpty() ? 0.0 : (double) suma / votos.size();
+        }
+    }
+
+    public static class VotoJuezDetalle {
+        public final String juez;
+        public final int estrellas;
+
+        public VotoJuezDetalle(String juez, int estrellas) {
+            this.juez = juez;
+            this.estrellas = estrellas;
+        }
+
+        @Override
+        public String toString() {
+            return juez + ": " + estrellas;
+        }
+    }
+
+    /**
+     * Muestra los resultados del concurso de pintura verificando la validez de las
+     * firmas
+     * con ModuloAnonimatoRSA.verificarFirmaRSA(...) y la llave pública del
+     * Presidente.
+     * Suma las calificaciones de los 3 jueces y las promedia, asignando el 1er
+     * lugar al
+     * que más se acerque a 3 y el último puesto al que más se acerque a 1.
+     * Si la firma es válida (TRUE), muestra las obras y su calificación promedio
+     * (SIN comentarios).
+     * Si la firma es inválida (FALSE), muestra una imagen indicando que el voto fue
+     * vulnerado
+     * y no muestra nada.
+     *
+     * @return true si los votos fueron válidos y se mostraron resultados; false si
+     *         algún voto fue vulnerado
+     */
+    public boolean mostrarResultadosConcurso() {
+        return mostrarResultadosConcurso(null);
+    }
+
+    /**
+     * Muestra y verifica los resultados del concurso para votos descegados.
+     *
+     * @param archivoDescegadoFiltro Archivo de voto descegado específico a
+     *                               verificar (o null para todos)
+     * @return true si todos los votos son válidos y auténticos; false si algún voto
+     *         fue vulnerado
+     */
+    public boolean mostrarResultadosConcurso(Path archivoDescegadoFiltro) {
+        if (!(motorAnonimato instanceof ModuloAnonimatoRSA moduloRSA)) {
+            System.out.println("[!] El módulo de anonimato RSA no está disponible para verificar.");
+            return false;
+        }
+
+        try {
+            // 1. Cargar la llave pública RSA del presidente desde
+            // "claves_usuario/presidente/presidente_RSA_pub.txt"
+            Path pathPubPresidente = Paths.get("claves_usuario", "presidente", "presidente_RSA_pub.txt");
+            if (!Files.exists(pathPubPresidente)) {
+                Path dirPresi = Paths.get("claves_usuario", "presidente");
+                if (Files.exists(dirPresi)) {
+                    try (Stream<Path> st = Files.list(dirPresi)) {
+                        Path pubAlt = st.filter(p -> p.getFileName().toString().endsWith("_RSA_pub.txt"))
+                                .findFirst().orElse(null);
+                        if (pubAlt != null) {
+                            pathPubPresidente = pubAlt;
+                        }
+                    }
+                }
+            }
+
+            if (!Files.exists(pathPubPresidente)) {
+                System.out.println("\n[!] No se encontró la llave pública RSA del presidente en: " + pathPubPresidente);
+                mostrarImagenVotoVulnerado();
+                return false;
+            }
+
+            RSAPublicKey pubPresidente = moduloRSA.cargarLlavePublica(pathPubPresidente);
+
+            // 2. Localizar archivos de votos descegados en "calificaciones_jueces/"
+            List<Path> archivosDescegados = new ArrayList<>();
+            if (archivoDescegadoFiltro != null && Files.exists(archivoDescegadoFiltro)) {
+                archivosDescegados.add(archivoDescegadoFiltro);
+            } else {
+                Path dirCalificaciones = Paths.get("calificaciones_jueces");
+                if (Files.exists(dirCalificaciones)) {
+                    try (Stream<Path> st = Files.list(dirCalificaciones)) {
+                        st.filter(p -> {
+                            String fn = p.getFileName().toString().toLowerCase();
+                            return fn.endsWith(".txt") && fn.contains("_descegado_");
+                        }).forEach(archivosDescegados::add);
+                    }
+                }
+            }
+
+            if (archivosDescegados.isEmpty()) {
+                System.out.println("\n==============================================================");
+                System.out.println(" RESULTADOS DEL CONCURSO DE PINTURA");
+                System.out.println("==============================================================");
+                System.out.println(
+                        "[!] No se encontraron votos descegados con firma del Presidente en 'calificaciones_jueces/'.");
+                System.out.println("    Asegúrese de que los jueces hayan evaluado las obras y descegado las firmas.");
+                System.out.println("==============================================================\n");
+                return false;
+            }
+
+            // 3. Verificar cada voto descegado contra la llave pública del presidente
+            List<ResultadoObraItem> listaResultados = new ArrayList<>();
+
+            for (Path pathDescegado : archivosDescegados) {
+                String fn = pathDescegado.getFileName().toString();
+                String[] parsed = extraerJuezYAutorDeNombreDescegado(fn);
+                String nombreJuez = (parsed != null) ? parsed[0] : "juez1";
+                String autorObra = (parsed != null) ? parsed[1] : "autor";
+
+                // Leer firma descegada (Base64)
+                String firmaB64 = Files.readString(pathDescegado, StandardCharsets.UTF_8).trim();
+                byte[] firmaDescegada = Base64.getDecoder().decode(firmaB64);
+
+                // Obtener datos del voto original que fueron firmados
+                byte[] datosOriginales = obtenerDatosVotoOriginal(nombreJuez, autorObra);
+
+                // 4. Verificación criptográfica con ModuloAnonimatoRSA.verificarFirmaRSA
+                boolean esValido = moduloRSA.verificarFirmaRSA(datosOriginales, firmaDescegada, pubPresidente);
+
+                if (!esValido) {
+                    // Si el método retorna FALSE, mostrar imagen de voto vulnerado y NO mostrar
+                    // nada
+                    System.out.println("\n[!] VERIFICACIÓN FALLIDA PARA EL VOTO: " + fn);
+                    mostrarImagenVotoVulnerado();
+                    return false;
+                }
+
+                // Obtener nombre de la obra y calificación (SIN comentario)
+                Path pathActa = encontrarActa(nombreJuez, autorObra);
+                ResultadoObraItem item = parsearObraYCalificacion(pathActa, nombreJuez, autorObra);
+                listaResultados.add(item);
+            }
+
+            // 5. Agrupar las calificaciones de los jueces por obra y calcular suma y
+            // promedio
+            Map<String, ResumenClasificacionObra> obrasMap = new LinkedHashMap<>();
+            for (ResultadoObraItem item : listaResultados) {
+                String clave = (item.obra + "___" + item.autor).toLowerCase();
+                ResumenClasificacionObra resumen = obrasMap.computeIfAbsent(clave,
+                        k -> new ResumenClasificacionObra(item.obra, item.autor));
+                resumen.agregarVoto(item.juez, item.estrellasNum);
+            }
+
+            List<ResumenClasificacionObra> ranking = new ArrayList<>(obrasMap.values());
+
+            // Ordenar por promedio descendente:
+            // "el que se acerque mas a 3 tendra el numero 1 y el que se acerque mas a 1
+            // tendra el ultimo puesto"
+            ranking.sort((a, b) -> {
+                int cmp = Double.compare(b.promedio, a.promedio);
+                if (cmp != 0) {
+                    return cmp;
+                }
+                return Integer.compare(b.suma, a.suma);
+            });
+
+            for (int i = 0; i < ranking.size(); i++) {
+                ranking.get(i).lugar = (i + 1);
+            }
+
+            // 6. Si todos los votos son validos (TRUE), mostrar la lista ordenada de obras,
+            // suma, promedio y lugar
+            String sep = "+-------+--------------------------+--------------------+------------------------------+--------+---------------+-----------------+";
+            String borde = "+" + "-".repeat(sep.length() - 2) + "+";
+            String titulo1 = "RESULTADOS OFICIALES DEL CONCURSO DE PINTURA";
+            String titulo2 = "(PROMEDIO DE LOS 3 JUECES EVALUADORES)";
+            int espacioInterno = sep.length() - 2;
+            int pad1 = Math.max(0, (espacioInterno - titulo1.length()) / 2);
+            int pad2 = Math.max(0, (espacioInterno - titulo2.length()) / 2);
+
+            System.out.println("\n" + borde);
+            System.out.println(
+                    "|" + " ".repeat(pad1) + titulo1 + " ".repeat(espacioInterno - pad1 - titulo1.length()) + "|");
+            System.out.println(
+                    "|" + " ".repeat(pad2) + titulo2 + " ".repeat(espacioInterno - pad2 - titulo2.length()) + "|");
+            System.out.println(sep);
+            System.out.printf("| %-5s | %-24s | %-18s | %-28s | %-6s | %-13s | %-15s |%n",
+                    "Lugar", "Obra Evaluada", "Autor / Pintor", "Calificaciones Jueces", "Suma", "Promedio", "Estado");
+            System.out.println(sep);
+
+            for (int i = 0; i < ranking.size(); i++) {
+                ResumenClasificacionObra r = ranking.get(i);
+                String estado = "-";
+                if (i == 0) {
+                    estado = "[GANADOR]";
+                } else if (i == ranking.size() - 1 && ranking.size() > 1) {
+                    estado = "[ULTIMO]";
+                }
+
+                StringBuilder sb = new StringBuilder();
+                for (int j = 0; j < r.votos.size(); j++) {
+                    if (j > 0)
+                        sb.append(", ");
+                    sb.append(r.votos.get(j).juez).append(": ").append(r.votos.get(j).estrellas);
+                }
+                String desgloseVotos = sb.toString();
+
+                String promStr = String.format(java.util.Locale.US, "%.2f / 3.00", r.promedio);
+                String sumaStr = r.suma + " pts";
+
+                String obraStr = r.obra.length() > 24 ? r.obra.substring(0, 21) + "..." : r.obra;
+                String autorStr = r.autor.length() > 18 ? r.autor.substring(0, 15) + "..." : r.autor;
+
+                System.out.printf("| %-5s | %-24s | %-18s | %-28s | %-6s | %-13s | %-15s |%n",
+                        "#" + r.lugar, obraStr, autorStr, desgloseVotos, sumaStr, promStr, estado);
+            }
+
+            System.out.println(sep);
+            if (!ranking.isEmpty()) {
+                ResumenClasificacionObra ganador = ranking.get(0);
+                System.out.printf(
+                        " [GANADOR - 1er LUGAR] Obra: '%s' | Autor: %s | Promedio: %.2f / 3.00 (Suma: %d pts)%n",
+                        ganador.obra, ganador.autor, ganador.promedio, ganador.suma);
+                if (ranking.size() > 1) {
+                    ResumenClasificacionObra ultimo = ranking.get(ranking.size() - 1);
+                    System.out.printf(
+                            " [ULTIMO PUESTO]      Obra: '%s' | Autor: %s | Promedio: %.2f / 3.00 (Suma: %d pts)%n",
+                            ultimo.obra, ultimo.autor, ultimo.promedio, ultimo.suma);
+                }
+            }
+            System.out.println("-".repeat(sep.length()));
+            System.out.println(" [OK] Todos los votos fueron validados criptograficamente mediante Chaum RSA");
+            System.out.println("      con la llave publica del Presidente (" + pathPubPresidente + ").");
+            System.out.println(borde + "\n");
+
+            return true;
+
+        } catch (Exception e) {
+            System.out.println("\n[!] Error al verificar y mostrar los resultados: " + e.getMessage());
+            mostrarImagenVotoVulnerado();
+            return false;
+        }
+    }
+
+    /**
+     * Devuelve el ranking calculado de las obras evaluadas.
+     */
+    public List<ResumenClasificacionObra> obtenerRankingObras() {
+        if (!(motorAnonimato instanceof ModuloAnonimatoRSA moduloRSA)) {
+            return Collections.emptyList();
+        }
+
+        try {
+            Path pathPubPresidente = Paths.get("claves_usuario", "presidente", "presidente_RSA_pub.txt");
+            if (!Files.exists(pathPubPresidente)) {
+                return Collections.emptyList();
+            }
+            RSAPublicKey pubPresidente = moduloRSA.cargarLlavePublica(pathPubPresidente);
+
+            List<Path> archivosDescegados = new ArrayList<>();
+            Path dirCalificaciones = Paths.get("calificaciones_jueces");
+            if (Files.exists(dirCalificaciones)) {
+                try (Stream<Path> st = Files.list(dirCalificaciones)) {
+                    st.filter(p -> {
+                        String fn = p.getFileName().toString().toLowerCase();
+                        return fn.endsWith(".txt") && fn.contains("_descegado_");
+                    }).forEach(archivosDescegados::add);
+                }
+            }
+
+            Map<String, ResumenClasificacionObra> obrasMap = new LinkedHashMap<>();
+
+            for (Path pathDescegado : archivosDescegados) {
+                String fn = pathDescegado.getFileName().toString();
+                String[] parsed = extraerJuezYAutorDeNombreDescegado(fn);
+                String nombreJuez = (parsed != null) ? parsed[0] : "juez1";
+                String autorObra = (parsed != null) ? parsed[1] : "autor";
+
+                String firmaB64 = Files.readString(pathDescegado, StandardCharsets.UTF_8).trim();
+                byte[] firmaDescegada = Base64.getDecoder().decode(firmaB64);
+                byte[] datosOriginales = obtenerDatosVotoOriginal(nombreJuez, autorObra);
+
+                if (!moduloRSA.verificarFirmaRSA(datosOriginales, firmaDescegada, pubPresidente)) {
+                    return Collections.emptyList();
+                }
+
+                Path pathActa = encontrarActa(nombreJuez, autorObra);
+                ResultadoObraItem item = parsearObraYCalificacion(pathActa, nombreJuez, autorObra);
+                String clave = (item.obra + "___" + item.autor).toLowerCase();
+                ResumenClasificacionObra resumen = obrasMap.computeIfAbsent(clave,
+                        k -> new ResumenClasificacionObra(item.obra, item.autor));
+                resumen.agregarVoto(item.juez, item.estrellasNum);
+            }
+
+            List<ResumenClasificacionObra> ranking = new ArrayList<>(obrasMap.values());
+            ranking.sort((a, b) -> {
+                int cmp = Double.compare(b.promedio, a.promedio);
+                if (cmp != 0) {
+                    return cmp;
+                }
+                return Integer.compare(b.suma, a.suma);
+            });
+
+            for (int i = 0; i < ranking.size(); i++) {
+                ranking.get(i).lugar = (i + 1);
+            }
+            return ranking;
+
+        } catch (Exception e) {
+            return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Realiza el flujo completo de evaluación y firma por los 3 jueces para una
+     * misma imagen:
+     * - Juez 1, Juez 2 y Juez 3 evalúan la imagen y registran sus calificaciones.
+     * - Cada juez ciega su voto con la llave pública del presidente.
+     * - El presidente firma cada voto cegado.
+     * - Cada juez descega su firma recibida del presidente.
+     *
+     * @param nombreObra Nombre de la obra evaluada
+     * @param autorObra  Nombre del autor de la obra
+     * @param votos      Arreglo con las calificaciones de los 3 jueces (1 a 3
+     *                   estrellas)
+     * @return true si los 3 jueces completaron exitosamente su ciclo
+     */
+    public boolean evaluarObraPorTresJueces(String nombreObra, String autorObra, int[] votos) {
+        if (votos == null || votos.length < 3) {
+            throw new IllegalArgumentException("Se requieren las calificaciones de los 3 jueces.");
+        }
+
+        String[] nombresJueces = { "juez1", "juez2", "juez3" };
+        System.out.println("\n==============================================================");
+        System.out.println(" EVALUACIÓN DE OBRA POR LOS 3 JUECES (CONCURSO DE PINTURA)");
+        System.out.println("==============================================================");
+        System.out.println("Obra a evaluar:        " + nombreObra);
+        System.out.println("Autor / Pintor:        " + autorObra);
+        System.out.println("Jueces asignados:      juez1, juez2, juez3");
+        System.out.println("Calificaciones dadas:  [" + votos[0] + ", " + votos[1] + ", " + votos[2] + "]");
+        System.out.println("--------------------------------------------------------------");
+
+        try {
+            Usuario presi = new Usuario("presi-id", "presidente", RolUsuario.PRESIDENTE);
+            inicializarOGenerarLlavesRSAPresidente(presi);
+
+            for (int i = 0; i < 3; i++) {
+                String juez = nombresJueces[i];
+                int est = Math.max(1, Math.min(3, votos[i]));
+                String com = "Evaluación emitida por " + juez;
+
+                System.out.println(
+                        "\n--- [PASO " + (i + 1) + "/3] Juez " + juez + " emite calificacion (" + est + "/3) ---");
+
+                // 1. Juez registra acta
+                registrarVeredictoJuez(juez, nombreObra, autorObra, est, com);
+
+                // 2. Juez ciega su voto
+                Path pathCegado = cegarCalificacionJuez(juez, autorObra);
+                if (pathCegado == null) {
+                    System.out.println("[!] Fallo al cegar el voto de " + juez);
+                    return false;
+                }
+
+                // 3. Presidente firma el voto cegado
+                Path pathFirmaPresi = firmarVotoCegadoPresidente(presi, juez, autorObra);
+                if (pathFirmaPresi == null) {
+                    System.out.println("[!] Fallo al firmar el voto cegado de " + juez);
+                    return false;
+                }
+
+                // 4. Juez descega la firma
+                Path pathDescegado = descegarFirmaJuez(juez, autorObra);
+                if (pathDescegado == null) {
+                    System.out.println("[!] Fallo al descegar la firma de " + juez);
+                    return false;
+                }
+            }
+
+            System.out.println("\n==============================================================");
+            System.out.println(" [OK] Los 3 jueces han firmado y descegado sus votos para: " + nombreObra);
+            System.out.println("==============================================================\n");
+            return true;
+
+        } catch (Exception e) {
+            System.out.println("[!] Error durante la evaluación de los 3 jueces: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Muestra la alerta visual e imagen física indicando que el voto fue vulnerado.
+     */
+    public void mostrarImagenVotoVulnerado() {
+        // 1. Mostrar banner e imagen ASCII en consola
+        System.out.println("\n");
+        System.out.println("  +---------------------------------------------------------------+");
+        System.out.println("  |                 [!] ALERTA CRIPTOGRAFICA                      |");
+        System.out.println("  |             EL VOTO HA SIDO VULNERADO / ALTERADO              |");
+        System.out.println("  |---------------------------------------------------------------|");
+        System.out.println("  |  [!] La firma digital RSA del Presidente NO coincide.         |");
+        System.out.println("  |  [!] Por directiva de seguridad, NO se muestra ningun dato.   |");
+        System.out.println("  +---------------------------------------------------------------+\n");
+
+        // 2. Generar archivo de imagen físico en 'imagenes/voto_vulnerado.png'
+        try {
+            Path dirImagenes = Paths.get("imagenes");
+            Files.createDirectories(dirImagenes);
+            Path pathImagen = dirImagenes.resolve("voto_vulnerado.png");
+
+            int width = 720;
+            int height = 360;
+            BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g2d = img.createGraphics();
+
+            // Fondo oscuro con borde rojo de advertencia
+            g2d.setColor(new Color(24, 24, 27));
+            g2d.fillRect(0, 0, width, height);
+
+            g2d.setColor(new Color(220, 38, 38));
+            g2d.setStroke(new BasicStroke(6));
+            g2d.drawRect(10, 10, width - 20, height - 20);
+
+            // Icono / Encabezado
+            g2d.setColor(new Color(239, 68, 68));
+            g2d.setFont(new Font("Arial", Font.BOLD, 30));
+            g2d.drawString("[!] ALERTA: VOTO VULNERADO [!]", 140, 70);
+
+            g2d.setColor(Color.WHITE);
+            g2d.setFont(new Font("Arial", Font.BOLD, 17));
+            g2d.drawString("FALLA DE INTEGRIDAD CRIPTOGRAFICA (CHAUM RSA)", 115, 125);
+
+            g2d.setFont(new Font("Arial", Font.PLAIN, 15));
+            g2d.drawString("• ModuloAnonimatoRSA.verificarFirmaRSA(...) retorno: FALSE", 110, 175);
+            g2d.drawString("• El contenido del voto o la firma sufrieron alteraciones.", 110, 215);
+            g2d.drawString("• Por directiva de seguridad, ningun resultado sera mostrado.", 110, 255);
+
+            g2d.setColor(new Color(220, 38, 38));
+            g2d.setFont(new Font("Arial", Font.BOLD, 14));
+            g2d.drawString("SISTEMA DE CONCURSO DE PINTURA - ELECCIONES SEGURAS", 135, 310);
+
+            g2d.dispose();
+            ImageIO.write(img, "png", pathImagen.toFile());
+
+            // Abrir imagen en el visor del sistema si no es headless
+            try {
+                if (!GraphicsEnvironment.isHeadless() && Desktop.isDesktopSupported()) {
+                    Desktop desktop = Desktop.getDesktop();
+                    if (desktop.isSupported(Desktop.Action.OPEN)) {
+                        desktop.open(pathImagen.toFile());
+                    }
+                }
+            } catch (Exception ex) {
+                try {
+                    new ProcessBuilder("cmd", "/c", "start", "", pathImagen.toAbsolutePath().toString()).start();
+                } catch (Exception ignored) {
+                }
+            }
+        } catch (Exception e) {
+            System.out.println("[!] Nota: No se pudo generar la imagen gráfica física: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Extrae el juez y el autor a partir del nombre del archivo descegado:
+     * "NombreJuez_descegado_autorObra.txt" -> [NombreJuez, autorObra].
+     */
+    public String[] extraerJuezYAutorDeNombreDescegado(String fileName) {
+        String base = fileName.toLowerCase().endsWith(".txt")
+                ? fileName.substring(0, fileName.length() - 4)
+                : fileName;
+        int idx = base.indexOf("_descegado_");
+        if (idx > 0) {
+            String juez = base.substring(0, idx);
+            String autor = base.substring(idx + "_descegado_".length());
+            return new String[] { juez, autor };
+        }
+        return null;
+    }
+
+    /**
+     * Localiza el acta de calificación correspondiente al juez y autor.
+     */
+    public Path encontrarActa(String nombreJuez, String autorObra) {
+        Path dirCalificaciones = Paths.get("calificaciones_jueces");
+        if (!Files.exists(dirCalificaciones)) {
+            return null;
+        }
+        try (Stream<Path> st = Files.list(dirCalificaciones)) {
+            return st.filter(p -> {
+                String fn = p.getFileName().toString().toLowerCase();
+                return fn.startsWith(nombreJuez.toLowerCase() + "_acta_")
+                        && fn.endsWith("_" + autorObra.toLowerCase() + ".txt");
+            }).findFirst().orElse(null);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * Extrae la obra y calificación a partir del acta, SIN extraer ni mostrar el
+     * comentario.
+     */
+    public ResultadoObraItem parsearObraYCalificacion(Path pathActa, String nombreJuez, String autorObra) {
+        String obra = "Desconocida";
+        String autor = autorObra;
+        String juez = nombreJuez;
+        int estrellasNum = 3;
+        String calificacion = "3 estrellas";
+
+        if (pathActa != null && Files.exists(pathActa)) {
+            try {
+                List<String> lineas = Files.readAllLines(pathActa, StandardCharsets.UTF_8);
+                for (String l : lineas) {
+                    String linea = l.trim();
+                    if (linea.toLowerCase().startsWith("obra evaluada:")) {
+                        obra = linea.substring("obra evaluada:".length()).trim();
+                    } else if (linea.toLowerCase().startsWith("autor / pintor:")
+                            || linea.toLowerCase().startsWith("autor:")) {
+                        autor = linea.substring(linea.indexOf(":") + 1).trim();
+                    } else if (linea.toLowerCase().startsWith("juez evaluador:")
+                            || linea.toLowerCase().startsWith("juez:")) {
+                        juez = linea.substring(linea.indexOf(":") + 1).trim();
+                    } else if (linea.toLowerCase().startsWith("estrellas:")) {
+                        String numStr = linea.substring("estrellas:".length()).trim();
+                        try {
+                            int n = Integer.parseInt(numStr);
+                            estrellasNum = Math.max(1, Math.min(3, n));
+                            calificacion = n + " estrellas";
+                        } catch (Exception ex) {
+                            calificacion = numStr + " estrellas";
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
+        if ("Desconocida".equals(obra)) {
+            Path dirImg = Paths.get("imagenes");
+            if (Files.exists(dirImg)) {
+                try (Stream<Path> st = Files.list(dirImg)) {
+                    Path img = st
+                            .filter(p -> p.getFileName().toString().toLowerCase().contains(autorObra.toLowerCase()))
+                            .findFirst().orElse(null);
+                    if (img != null) {
+                        obra = extraerNombreBaseObra(img.getFileName().toString());
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        return new ResultadoObraItem(obra, autor, juez, estrellasNum, calificacion);
     }
 }
