@@ -1,4 +1,4 @@
-package com.paintingcompetition.infrastructure.adapters.in.console;
+﻿package com.paintingcompetition.infrastructure.adapters.in.console;
 
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
@@ -1032,7 +1032,7 @@ public class MenuPrincipalConsola {
                     "\n--- Panel del Pintor ("
                             + pintor.getNombreUsuario() + ") ---");
 
-            System.out.println("1. Registrar y proteger obra (Generar llave AES con el Sistema - ECDH)");
+            System.out.println("1. [USO] Registrar y proteger obra (Generar llave AES con el Sistema - ECDH)");
             System.out.println("2. Demostración de autenticidad ECDSA de obra");
             System.out.println("3. Consultar mis obras registradas");
             System.out.println("4. Regresar al menú de inicio");
@@ -1229,8 +1229,8 @@ public class MenuPrincipalConsola {
                     "\n--- Panel del Juez ("
                             + juez.getNombreUsuario() + ") ---");
 
-            System.out.println("1. Ver imágenes y calificar obra");
-            System.out.println("2. Descegar firma de calificación (Recuperar voto firmado por el Presidente)");
+            System.out.println("1. [USO] Ver imágenes y calificar obra");
+            System.out.println("2. [USO] Descegar firma de calificación (Recuperar voto firmado por el Presidente)");
             System.out.println("3. Calificar obra");
             System.out.println("4. Regresar al menú de inicio");
             System.out.print("Seleccione una opción: ");
@@ -2705,7 +2705,7 @@ public class MenuPrincipalConsola {
                     "\n--- Panel del Presidente ("
                             + presidente.getNombreUsuario() + ") ---");
 
-            System.out.println("1. Realizar firma ciega de voto de un Juez (Chaum RSA)");
+            System.out.println("1. [USO] Realizar firma ciega de voto de un Juez (Chaum RSA)");
             System.out.println("2. Emitir y firmar Acta de Resultados (RSASSA-PSS - FIPS 186-5)");
             System.out.println("3. Verificar firma de un Acta de Resultados existente");
             System.out.println("4. Simulación de firma ciega (RSA Chaum)");
